@@ -25,7 +25,7 @@ from datetime import datetime
 load_dotenv()
 
 # Constants
-ROWS_TO_PROCESS = 1
+ROWS_TO_PROCESS = 8
 NUM_ANALYSTS = 8
 OUTPUT_DIR = "screenshots"
 SCREENSHOT_WIDTH = 1024
@@ -75,6 +75,35 @@ GEOINT_RESPONSE_SCHEMA = {
         },
     },
     "required": ["findings", "analysis", "things_to_continue_analyzing", "action"],
+}
+
+# Commander model — a larger, more deliberate Gemini variant (Pro vs Flash) used
+# once per base to synthesize the 8 analyst reports into a single intelligence
+# product. Different model, same API, same key.
+COMMANDER_MODEL = "gemini-2.5-pro"
+
+# Structured-output schema for the commander. Each field is picked to map
+# cleanly onto Streamlit widgets in the final GUI step.
+COMMANDER_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "executive_summary": {"type": "string"},
+        "facility_classification": {"type": "string"},
+        "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+        "key_findings": {"type": "array", "items": {"type": "string"}},
+        "threat_assessment": {"type": "string"},
+        "recommended_next_steps": {"type": "array", "items": {"type": "string"}},
+        "disagreements_or_uncertainties": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "executive_summary",
+        "facility_classification",
+        "confidence",
+        "key_findings",
+        "threat_assessment",
+        "recommended_next_steps",
+        "disagreements_or_uncertainties",
+    ],
 }
 
 
@@ -371,6 +400,69 @@ If imagery is unusable (cloud cover, blank tile, solid color, no visible ground 
         }
 
 
+def run_commander(analysts, country, base_id):
+    """
+    Synthesize the 8 analysts' reports into a single intelligence product using
+    a larger Gemini model (2.5 Pro). Returns a parsed dict matching
+    COMMANDER_RESPONSE_SCHEMA — safe to dump straight into JSON for the GUI.
+    """
+    print(f"  Commander synthesizing {len(analysts)} analyst reports with {COMMANDER_MODEL}...")
+
+    transcript = format_history_of_analysts(analysts)
+
+    commander_prompt = f"""You are a senior military intelligence commander. Intel suggests the location in {country} (site ID {base_id}) is an enemy military facility. Eight analysts have independently examined satellite imagery from different zoom levels and positions — each saw a different frame, and later analysts were shown earlier analysts' notes but told not to treat them as fact.
+
+Your job: synthesize their observations into a single authoritative intelligence report a field commander can act on. Analysts may disagree, overfit to small details, or miss the bigger picture. Reconcile the evidence, weight findings by how many analysts corroborated them, and produce a clear assessment.
+
+Here is the full transcript of the analysts' findings (each block is one analyst):
+
+{transcript}
+
+Respond ONLY with a JSON object with these keys:
+- executive_summary: 1-3 sentence tl;dr of what this facility is and why it matters to the US army.
+- facility_classification: short concrete label for the facility type (e.g. "Air Base", "Surface-to-Air Missile Site", "Naval Port", "Radar Station", "Army Garrison", "Storage Depot", "Unknown"). Pick one.
+- confidence: one of ["low", "medium", "high"] — how confident you are in the classification given the evidence.
+- key_findings: 3-7 consolidated findings as single sentences, ordered by military significance (most important first). Consolidate duplicates across analysts.
+- threat_assessment: one paragraph covering offensive/defensive capability, operational readiness indicators, and the reasoning behind your threat judgment.
+- recommended_next_steps: concrete follow-up actions (e.g. "request high-resolution SAR imagery of the eastern perimeter", "monitor hangar activity over 72h for aircraft movement", "cross-reference with SIGINT on frequencies X-Y MHz").
+- disagreements_or_uncertainties: points where analysts diverged or where evidence was ambiguous. If the analysts were fully consistent, return [].
+
+Rules:
+- Do not invent findings not supported by any analyst.
+- A single analyst's isolated claim is weaker evidence than a finding repeated by multiple analysts — weight accordingly.
+- Be specific, not generic. "Possible SAM site" is better than "possible military asset".
+- Return ONLY the JSON object — no markdown fences, no preamble, no trailing commentary."""
+
+    try:
+        model = genai.GenerativeModel(COMMANDER_MODEL)
+        response = model.generate_content(
+            commander_prompt,
+            generation_config={
+                "response_mime_type": "application/json",
+                "response_schema": COMMANDER_RESPONSE_SCHEMA,
+            },
+        )
+        report = json.loads(response.text)
+        print(
+            f"  ✓ Commander report complete — "
+            f"classification={report['facility_classification']}, "
+            f"confidence={report['confidence']}"
+        )
+        return report
+
+    except Exception as e:
+        print(f"  ✗ Error generating commander report: {e}")
+        return {
+            "executive_summary": f"Error: {e}",
+            "facility_classification": "Unknown",
+            "confidence": "low",
+            "key_findings": [],
+            "threat_assessment": f"Commander synthesis failed: {e}",
+            "recommended_next_steps": [],
+            "disagreements_or_uncertainties": [],
+        }
+
+
 def save_analysis_to_json(results, filename=None):
     """
     Save analysis results to a JSON file.
@@ -439,6 +531,13 @@ def save_analysis_to_text(results, filename=None):
                 )
                 f.write(f"{'-'*80}\n")
                 f.write(json.dumps(analyst['analysis'], indent=2, ensure_ascii=False) + "\n")
+
+            commander = result.get('commander_report')
+            if commander:
+                f.write(f"\n{'#'*80}\n")
+                f.write(f"COMMANDER REPORT — Base {result['base_id']}\n")
+                f.write(f"{'#'*80}\n")
+                f.write(json.dumps(commander, indent=2, ensure_ascii=False) + "\n")
             f.write("\n")
     
     print(f"  ✓ Text report saved: {filepath}")
@@ -536,16 +635,24 @@ def analyze_military_bases():
                 else:
                     print(f"  → analyst chose 'finish' — next analyst reuses the same view")
 
+            # ========== Commander synthesis ==========
+            print(f"\n{'-'*70}")
+            print(f"COMMANDER — Base {base_id} ({country})")
+            print(f"{'-'*70}")
+            commander_report = run_commander(analysts, country, base_id)
+            print(json.dumps(commander_report, indent=2, ensure_ascii=False))
+
             result_entry = {
                 "base_id": base_id,
                 "country": country,
                 "initial_latitude": initial_lat,
                 "initial_longitude": initial_lon,
                 "analysts": analysts,
+                "commander_report": commander_report,
             }
             analysis_results.append(result_entry)
 
-            print(f"\n✓ Base {base_id} completed — {NUM_ANALYSTS} analysts across {view_idx} distinct views")
+            print(f"\n✓ Base {base_id} completed — {NUM_ANALYSTS} analysts across {view_idx} distinct views + commander")
     
     finally:
         # Close the browser
