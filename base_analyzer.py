@@ -7,6 +7,7 @@ import csv
 import os
 import time
 import json
+import math
 from pathlib import Path
 from PIL import Image
 from selenium import webdriver
@@ -25,10 +26,21 @@ load_dotenv()
 
 # Constants
 ROWS_TO_PROCESS = 1
+NUM_ANALYSTS = 8
 OUTPUT_DIR = "screenshots"
 SCREENSHOT_WIDTH = 1024
 DATA_DIR = "data"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# View-navigation parameters. The analyst's `action` mutates a per-base state
+# dict with these three fields; `zoom` is the camera-to-target distance in
+# meters (smaller = more zoomed in) which maps directly to the `d` param in
+# the Google Earth @-URL.
+INITIAL_ZOOM_RANGE = 5000   # meters
+ZOOM_FACTOR = 2.0           # half / double the range per zoom action
+MIN_ZOOM_RANGE = 100        # m — prevent tunneling into the ground
+MAX_ZOOM_RANGE = 50000      # m — prevent zooming to orbit
+MOVE_FRACTION = 0.6         # shift longitude by 60% of the current range
 
 # Gemini Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -37,9 +49,17 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Google Earth URL parameters
-# Simple approach: use Google Earth search with coordinates
-GOOGLE_EARTH_URL_TEMPLATE = "https://earth.google.com/web/search/{latitude},{longitude}"
+# Google Earth Web URL format: @lat,lon,{alt}a,{distance}d,{fov}y,{heading}h,{tilt}t,{roll}r
+#   lat,lon  — target coordinates
+#   alt (a)  — target altitude in meters above sea level (0 = sea level; safe default)
+#   dist (d) — camera distance from target in meters (this IS the zoom)
+#   fov (y)  — vertical field of view in degrees (35 is Google's default)
+#   heading (h) — 0 = north up
+#   tilt (t) — 0 = top-down satellite view
+#   roll (r) — always 0
+GOOGLE_EARTH_URL_TEMPLATE = (
+    "https://earth.google.com/web/@{lat},{lon},0a,{range}d,35y,0h,0t,0r"
+)
 
 # Structured-output schema for the analyst. `action` is a strict enum so the
 # next step (Selenium dispatcher) can rely on exactly these five values.
@@ -58,23 +78,45 @@ GEOINT_RESPONSE_SCHEMA = {
 }
 
 
-def create_google_earth_url(latitude, longitude):
+def create_google_earth_url(latitude, longitude, zoom_range):
     """
-    Create a Google Earth Web search URL for a specific location.
-    Uses simple coordinate search for precise positioning.
-    
-    Args:
-        latitude: Base latitude
-        longitude: Base longitude
-    
-    Returns:
-        URL string for Google Earth Web search
+    Build a Google Earth Web @-URL pinning camera at (lat, lon) with the given
+    camera-to-target distance. `zoom_range` is meters — smaller = more zoomed in.
     """
-    url = GOOGLE_EARTH_URL_TEMPLATE.format(
-        latitude=latitude,
-        longitude=longitude
+    return GOOGLE_EARTH_URL_TEMPLATE.format(
+        lat=latitude,
+        lon=longitude,
+        range=int(round(zoom_range)),
     )
-    return url
+
+
+def apply_action(state, action):
+    """
+    Mutate the per-base view state dict in place based on the analyst's action.
+
+    `state` has keys: lat (deg), lon (deg), zoom (camera distance, meters).
+    - zoom-in / zoom-out: halve or double `zoom`, clamped to [MIN, MAX] range.
+    - move-left / move-right: shift `lon` by MOVE_FRACTION * zoom, converted
+      from meters to degrees of longitude via the cos(lat) correction.
+    - finish: no-op.
+    """
+    if action == "zoom-in":
+        state["zoom"] = max(MIN_ZOOM_RANGE, state["zoom"] / ZOOM_FACTOR)
+    elif action == "zoom-out":
+        state["zoom"] = min(MAX_ZOOM_RANGE, state["zoom"] * ZOOM_FACTOR)
+    elif action in ("move-left", "move-right"):
+        shift_meters = state["zoom"] * MOVE_FRACTION
+        # 1 degree of latitude ≈ 111,320 m; 1 degree of longitude shrinks by cos(lat).
+        meters_per_degree_lon = max(1.0, 111320.0 * math.cos(math.radians(state["lat"])))
+        delta_lon = shift_meters / meters_per_degree_lon
+        if action == "move-left":
+            delta_lon = -delta_lon
+        new_lon = state["lon"] + delta_lon
+        if new_lon > 180:
+            new_lon -= 360
+        elif new_lon < -180:
+            new_lon += 360
+        state["lon"] = new_lon
 
 
 def setup_chrome_driver():
@@ -106,19 +148,14 @@ def setup_chrome_driver():
     return driver
 
 
-def take_screenshot(driver, base_id, country):
+def take_screenshot(driver, base_id, country, view_idx):
     """
     Take a screenshot of the current page and save it.
     Uses smart synchronization: waits for canvas elements to be present,
     then adds a render buffer to ensure WebGL tiles are streamed and rendered.
-    
-    Args:
-        driver: Selenium WebDriver instance
-        base_id: Military base ID
-        country: Country name
-    
-    Returns:
-        Path to the saved screenshot file
+
+    `view_idx` is the sequential index of the distinct view for this base
+    (increments each time the analyst triggers a zoom/move navigation).
     """
     print(f"  Waiting for Google Earth to load and render...")
     
@@ -170,25 +207,20 @@ def take_screenshot(driver, base_id, country):
     
     # ========== PHASE 4: Capture Screenshot ==========
     print(f"  Capturing screenshot...")
-    screenshot_path = os.path.join(OUTPUT_DIR, f"base_{base_id}_{country}_raw.png")
+    screenshot_path = os.path.join(OUTPUT_DIR, f"base_{base_id}_{country}_v{view_idx}_raw.png")
     driver.save_screenshot(screenshot_path)
     print(f"  ✓ Raw screenshot saved")
     
     return screenshot_path
 
 
-def process_image(input_path, base_id, country):
+def process_image(input_path, base_id, country, view_idx):
     """
     Process the screenshot: scale to 1024px width and convert to JPEG.
     This reduces file size and makes the image more suitable for LLM analysis.
-    
-    Args:
-        input_path: Path to the raw screenshot (PNG)
-        base_id: Military base ID
-        country: Country name
-    
-    Returns:
-        Path to the processed image file (JPEG)
+
+    `view_idx` matches the one passed to `take_screenshot` so the processed
+    JPEG lines up 1:1 with its raw PNG source.
     """
     print(f"  Processing image...")
     
@@ -209,7 +241,7 @@ def process_image(input_path, base_id, country):
         
         # ========== Format Conversion ==========
         # Convert to JPEG for reduced file size
-        output_path = os.path.join(OUTPUT_DIR, f"base_{base_id}_{country}.jpg")
+        output_path = os.path.join(OUTPUT_DIR, f"base_{base_id}_{country}_v{view_idx}.jpg")
         img_resized.save(output_path, "JPEG", quality=85, optimize=True)
         
         # Get file sizes for verification
@@ -252,17 +284,33 @@ def read_military_bases_csv(csv_path, num_rows=ROWS_TO_PROCESS):
     return bases
 
 
-def analyze_with_gemini(image_path, base_id, country):
+def format_history_of_analysts(prior_analysts):
     """
-    Analyze satellite image with Gemini 2.5 Flash model for GEOINT intelligence.
-    
-    Args:
-        image_path: Path to the processed JPEG image
-        base_id: Military base ID
-        country: Country name
-    
-    Returns:
-        Analysis results from Gemini
+    Render a compact, readable transcript of the prior analysts' outputs so it
+    can be injected into the next analyst's prompt. One block per analyst with
+    findings / analysis / next-steps / recommended action.
+    """
+    blocks = []
+    for a in prior_analysts:
+        inner = a["analysis"]
+        blocks.append(
+            f"--- Analyst {a['analyst_num']} (view #{a['view_idx']}) ---\n"
+            f"findings: {json.dumps(inner['findings'], ensure_ascii=False)}\n"
+            f"analysis: {inner['analysis']}\n"
+            f"things_to_continue_analyzing: "
+            f"{json.dumps(inner['things_to_continue_analyzing'], ensure_ascii=False)}\n"
+            f"recommended_action: {inner['action']}"
+        )
+    return "\n\n".join(blocks)
+
+
+def analyze_with_gemini(image_path, base_id, country, history=None):
+    """
+    Analyze a satellite image with Gemini 2.5 Flash and return a parsed dict
+    with `findings` / `analysis` / `things_to_continue_analyzing` / `action`.
+
+    If `history` is provided (a formatted string from `format_history_of_analysts`),
+    it is appended to the prompt so the analyst can build on prior findings.
     """
     print(f"  Analyzing with Gemini 2.5 Flash...")
     
@@ -286,6 +334,14 @@ def analyze_with_gemini(image_path, base_id, country):
 Return ONLY the JSON object, no markdown fences, no preamble, no trailing commentary.
 
 If imagery is unusable (cloud cover, blank tile, solid color, no visible ground features), set findings=[], put the reason in analysis, and set action='zoom-out'."""
+
+        if history:
+            geoint_prompt += (
+                "\n\nHere is the analysis of previous analysts about this area and their "
+                "recommendations. You can use this data but don't use it as fact, think "
+                "for yourself:\n\n"
+                f"{history}"
+            )
 
         model = genai.GenerativeModel("gemini-2.5-flash")
 
@@ -367,13 +423,22 @@ def save_analysis_to_text(results, filename=None):
             f.write(f"BASE #{idx} - ID: {result['base_id']}\n")
             f.write(f"{'='*80}\n")
             f.write(f"Country: {result['country']}\n")
-            f.write(f"Latitude: {result['latitude']}\n")
-            f.write(f"Longitude: {result['longitude']}\n")
-            f.write(f"Screenshot: {result['screenshot_file']}\n")
-            f.write(f"\n{'-'*80}\n")
-            f.write("GEOINT ANALYSIS:\n")
-            f.write(f"{'-'*80}\n")
-            f.write(json.dumps(result['geoint_analysis'], indent=2, ensure_ascii=False) + "\n")
+            f.write(f"Initial Latitude: {result['initial_latitude']}\n")
+            f.write(f"Initial Longitude: {result['initial_longitude']}\n")
+            f.write(f"Analysts: {len(result['analysts'])}\n")
+
+            for analyst in result['analysts']:
+                s = analyst['state_when_analyzed']
+                f.write(f"\n{'-'*80}\n")
+                f.write(
+                    f"ANALYST {analyst['analyst_num']} — view #{analyst['view_idx']} — "
+                    f"{analyst['screenshot_file']}\n"
+                )
+                f.write(
+                    f"  state: lat={s['lat']:.6f}, lon={s['lon']:.6f}, zoom={s['zoom']:.0f}m\n"
+                )
+                f.write(f"{'-'*80}\n")
+                f.write(json.dumps(analyst['analysis'], indent=2, ensure_ascii=False) + "\n")
             f.write("\n")
     
     print(f"  ✓ Text report saved: {filepath}")
@@ -407,50 +472,80 @@ def analyze_military_bases():
         for idx, base in enumerate(bases, 1):
             base_id = base['id']
             country = base['country']
-            latitude = float(base['latitude'])
-            longitude = float(base['longitude'])
-            
+            initial_lat = float(base['latitude'])
+            initial_lon = float(base['longitude'])
+
             print(f"\n{'='*70}")
             print(f"[{idx}/{len(bases)}] Processing Base {base_id} ({country})")
             print(f"{'='*70}")
-            print(f"Location: Latitude {latitude}, Longitude {longitude}")
-            
-            # ========== Step 1: Create Google Earth URL ==========
-            url = create_google_earth_url(latitude, longitude)
-            print(f"Opening: {url}")
-            
-            # ========== Step 2: Navigate to Google Earth ==========
-            driver.get(url)
-            
-            # ========== Step 3: Smart Screenshot with Render Buffer ==========
-            screenshot_path = take_screenshot(driver, base_id, country)
-            
-            # ========== Step 4: Process Image (Scale & Convert) ==========
-            final_path = process_image(screenshot_path, base_id, country)
-            
-            # ========== Step 5: GEOINT Analysis with Gemini ==========
-            print(f"\n  Starting GEOINT intelligence analysis...")
-            geoint_analysis = analyze_with_gemini(final_path, base_id, country)
-            
-            # ========== Print Analysis Results ==========
-            print(f"\n{'-'*70}")
-            print(f"GEOINT ANALYSIS RESULTS - Base {base_id} ({country})")
-            print(f"{'-'*70}")
-            print(json.dumps(geoint_analysis, indent=2, ensure_ascii=False))
-            print(f"{'-'*70}\n")
-            
-            # ========== Store Results for Saving ==========
+            print(f"Initial view: lat={initial_lat}, lon={initial_lon}, zoom={INITIAL_ZOOM_RANGE}m")
+
+            # Per-base mutable view state. Analyst `action` values mutate this
+            # between calls so the next analyst sees a different image.
+            state = {
+                "lat": initial_lat,
+                "lon": initial_lon,
+                "zoom": INITIAL_ZOOM_RANGE,
+            }
+
+            analysts = []
+            current_screenshot_path = None
+            view_idx = 0
+            need_new_view = True  # first analyst always needs the initial view
+
+            for analyst_num in range(1, NUM_ANALYSTS + 1):
+                print(f"\n{'-'*70}")
+                print(f"ANALYST {analyst_num}/{NUM_ANALYSTS} — Base {base_id} ({country})")
+                print(f"{'-'*70}")
+
+                if need_new_view:
+                    view_idx += 1
+                    url = create_google_earth_url(state["lat"], state["lon"], state["zoom"])
+                    print(f"View #{view_idx}: {url}")
+                    driver.get(url)
+                    raw_path = take_screenshot(driver, base_id, country, view_idx)
+                    current_screenshot_path = process_image(raw_path, base_id, country, view_idx)
+                    need_new_view = False
+                else:
+                    print(f"Reusing view #{view_idx} (previous analyst returned 'finish')")
+
+                history = format_history_of_analysts(analysts) if analysts else None
+                if history:
+                    print(f"  (injecting history from {len(analysts)} prior analyst(s))")
+                analysis = analyze_with_gemini(
+                    current_screenshot_path, base_id, country, history=history
+                )
+                print(json.dumps(analysis, indent=2, ensure_ascii=False))
+
+                analysts.append({
+                    "analyst_num": analyst_num,
+                    "view_idx": view_idx,
+                    "screenshot_file": os.path.basename(current_screenshot_path),
+                    "state_when_analyzed": dict(state),
+                    "analysis": analysis,
+                })
+
+                action = analysis["action"]
+                if action in ("zoom-in", "zoom-out", "move-left", "move-right"):
+                    apply_action(state, action)
+                    need_new_view = True
+                    print(
+                        f"  → applied '{action}' → next view: "
+                        f"lat={state['lat']:.6f}, lon={state['lon']:.6f}, zoom={state['zoom']:.0f}m"
+                    )
+                else:
+                    print(f"  → analyst chose 'finish' — next analyst reuses the same view")
+
             result_entry = {
                 "base_id": base_id,
                 "country": country,
-                "latitude": latitude,
-                "longitude": longitude,
-                "screenshot_file": os.path.basename(final_path),
-                "geoint_analysis": geoint_analysis
+                "initial_latitude": initial_lat,
+                "initial_longitude": initial_lon,
+                "analysts": analysts,
             }
             analysis_results.append(result_entry)
-            
-            print(f"✓ Base {base_id} completed successfully")
+
+            print(f"\n✓ Base {base_id} completed — {NUM_ANALYSTS} analysts across {view_idx} distinct views")
     
     finally:
         # Close the browser
