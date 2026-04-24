@@ -9,6 +9,11 @@ screenshots/
 *.jpg
 *.png
 
+# Analysis Data Output
+data/
+*.json
+*.txt
+
 # Python Cache
 __pycache__/
 *.py[cod]
@@ -41,3 +46,4 @@ chromedriver.exe
 
 # Logs
 *.log
+.jpg

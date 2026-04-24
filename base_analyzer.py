@@ -6,6 +6,7 @@ Analyzes military base locations using Google Earth imagery
 import csv
 import os
 import time
+import json
 from pathlib import Path
 from PIL import Image
 from selenium import webdriver
@@ -15,52 +16,47 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
+import google.generativeai as genai
+from dotenv import load_dotenv
+from datetime import datetime
+
+# Load environment variables from .env
+load_dotenv()
 
 # Constants
-ROWS_TO_PROCESS = 5
+ROWS_TO_PROCESS = 1
 OUTPUT_DIR = "screenshots"
 SCREENSHOT_WIDTH = 1024
+DATA_DIR = "data"
+TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# Gemini Configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY not found in .env file")
+
+genai.configure(api_key=GEMINI_API_KEY)
 
 # Google Earth URL parameters
-GOOGLE_EARTH_URL_TEMPLATE = "https://earth.google.com/web/@{latitude},{longitude},{altitude}a,{distance}d,{tilt}y,{heading}h,{time}t,{roll}r"
-
-# Default camera parameters for Google Earth
-DEFAULT_ALTITUDE = 1000  # meters above sea level
-DEFAULT_DISTANCE = 5000  # camera distance from the point
-DEFAULT_TILT = 45  # camera tilt angle (0 = straight down, 90 = horizon)
-DEFAULT_HEADING = 0  # compass heading (0 = north)
-DEFAULT_TIME = 0  # time parameter
-DEFAULT_ROLL = 0  # roll parameter
+# Simple approach: use Google Earth search with coordinates
+GOOGLE_EARTH_URL_TEMPLATE = "https://earth.google.com/web/search/{latitude},{longitude}"
 
 
-def create_google_earth_url(latitude, longitude, altitude=DEFAULT_ALTITUDE, 
-                           distance=DEFAULT_DISTANCE, tilt=DEFAULT_TILT,
-                           heading=DEFAULT_HEADING, time=DEFAULT_TIME, roll=DEFAULT_ROLL):
+def create_google_earth_url(latitude, longitude):
     """
-    Create a Google Earth Web URL for a specific location.
+    Create a Google Earth Web search URL for a specific location.
+    Uses simple coordinate search for precise positioning.
     
     Args:
         latitude: Base latitude
         longitude: Base longitude
-        altitude: Altitude above sea level in meters
-        distance: Camera distance from the point being looked at
-        tilt: Camera tilt angle (0° = straight down, 90° = toward horizon)
-        heading: Compass heading in degrees (0 = north, 90 = east)
-        time: Time parameter (usually 0)
-        roll: Roll parameter (usually 0)
     
     Returns:
-        URL string for Google Earth Web
+        URL string for Google Earth Web search
     """
     url = GOOGLE_EARTH_URL_TEMPLATE.format(
         latitude=latitude,
-        longitude=longitude,
-        altitude=altitude,
-        distance=distance,
-        tilt=tilt,
-        heading=heading,
-        time=time,
-        roll=roll
+        longitude=longitude
     )
     return url
 
@@ -108,7 +104,7 @@ def take_screenshot(driver, base_id, country):
     Returns:
         Path to the saved screenshot file
     """
-    print(f"  Waiting for Google Earth 3D canvas to load...")
+    print(f"  Waiting for Google Earth to load and render...")
     
     # ========== PHASE 1: Smart DOM Synchronization ==========
     # Wait for canvas elements to be present in the DOM
@@ -126,8 +122,8 @@ def take_screenshot(driver, base_id, country):
     # After DOM elements are present, wait for the actual 3D tiles to stream
     # and render on screen. Google Earth's WebGL rendering is asynchronous,
     # so we need this secondary buffer to guarantee the tiles are rendered.
-    print(f"  Render buffer: waiting 10 seconds for 3D tiles to stream and render...")
-    time.sleep(10)
+    print(f"  Render buffer: waiting 12 seconds for tiles to stream and render...")
+    time.sleep(12)
     
     # ========== PHASE 3: Cleanup Overlays ==========
     # Try to dismiss any UI overlays or loading indicators
@@ -240,13 +236,133 @@ def read_military_bases_csv(csv_path, num_rows=ROWS_TO_PROCESS):
     return bases
 
 
+def analyze_with_gemini(image_path, base_id, country):
+    """
+    Analyze satellite image with Gemini 2.5 Flash model for GEOINT intelligence.
+    
+    Args:
+        image_path: Path to the processed JPEG image
+        base_id: Military base ID
+        country: Country name
+    
+    Returns:
+        Analysis results from Gemini
+    """
+    print(f"  Analyzing with Gemini 2.5 Flash...")
+    
+    try:
+        # Read the image file
+        with open(image_path, "rb") as image_file:
+            image_data = image_file.read()
+        
+        # Create the prompt for GEOINT analysis
+        geoint_prompt = f"""You are a senior Geospatial Intelligence (GEOINT) analyst specializing in satellite imagery analysis for the US military. We have received intelligence that the provided satellite image shows a suspected military base/facility located in {country}.
+
+Your mission is to analyze the image thoroughly and extract actionable intelligence. Guide your analysis by looking for the following specific categories:
+
+1. Infrastructure: Runways, hangars, barracks, bunkers, communications towers, or storage tanks.
+2. Vehicles/Equipment: Aircraft, armored vehicles, transport convoys, or naval vessels.
+3. Defensive Measures: Radar installations, SAM (Surface-to-Air Missile) sites, trenches, or perimeter security.
+
+Provide detailed observations and assessment for each category found in the image. Be specific about locations, quantities, and any notable patterns or formations."""
+        
+        # Initialize Gemini model
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        
+        # Send image and prompt to Gemini
+        response = model.generate_content(
+            [
+                geoint_prompt,
+                {
+                    "mime_type": "image/jpeg",
+                    "data": image_data
+                }
+            ]
+        )
+        
+        analysis_text = response.text
+        print(f"  ✓ Analysis complete")
+        
+        return analysis_text
+    
+    except Exception as e:
+        print(f"  ✗ Error analyzing image with Gemini: {e}")
+        return f"Error: {str(e)}"
+
+
+def save_analysis_to_json(results, filename=None):
+    """
+    Save analysis results to a JSON file.
+    
+    Args:
+        results: List of analysis result dictionaries
+        filename: Optional custom filename
+    
+    Returns:
+        Path to saved JSON file
+    """
+    if not filename:
+        filename = f"analysis_results_{TIMESTAMP}.json"
+    
+    filepath = os.path.join(DATA_DIR, filename)
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+    
+    print(f"  ✓ JSON results saved: {filepath}")
+    return filepath
+
+
+def save_analysis_to_text(results, filename=None):
+    """
+    Save analysis results to a readable text file.
+    
+    Args:
+        results: List of analysis result dictionaries
+        filename: Optional custom filename
+    
+    Returns:
+        Path to saved text file
+    """
+    if not filename:
+        filename = f"analysis_report_{TIMESTAMP}.txt"
+    
+    filepath = os.path.join(DATA_DIR, filename)
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write("="*80 + "\n")
+        f.write("GEOINT ANALYSIS REPORT - MILITARY BASE INTELLIGENCE\n")
+        f.write("="*80 + "\n")
+        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Total Bases Analyzed: {len(results)}\n")
+        f.write("="*80 + "\n\n")
+        
+        for idx, result in enumerate(results, 1):
+            f.write(f"\n{'='*80}\n")
+            f.write(f"BASE #{idx} - ID: {result['base_id']}\n")
+            f.write(f"{'='*80}\n")
+            f.write(f"Country: {result['country']}\n")
+            f.write(f"Latitude: {result['latitude']}\n")
+            f.write(f"Longitude: {result['longitude']}\n")
+            f.write(f"Screenshot: {result['screenshot_file']}\n")
+            f.write(f"\n{'-'*80}\n")
+            f.write("GEOINT ANALYSIS:\n")
+            f.write(f"{'-'*80}\n")
+            f.write(f"{result['geoint_analysis']}\n")
+            f.write("\n")
+    
+    print(f"  ✓ Text report saved: {filepath}")
+    return filepath
+
+
 def analyze_military_bases():
     """
     Main function to analyze military bases.
-    Processes the first ROWS_TO_PROCESS bases.
+    Processes the first ROWS_TO_PROCESS bases and saves results.
     """
-    # Create output directory
+    # Create output directories
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
     
     csv_path = "military_bases.csv"
     
@@ -255,6 +371,9 @@ def analyze_military_bases():
     bases = read_military_bases_csv(csv_path, ROWS_TO_PROCESS)
     
     print(f"Found {len(bases)} bases to process\n")
+    
+    # Initialize results collection
+    analysis_results = []
     
     # Initialize Chrome driver
     driver = setup_chrome_driver()
@@ -284,18 +403,54 @@ def analyze_military_bases():
             # ========== Step 4: Process Image (Scale & Convert) ==========
             final_path = process_image(screenshot_path, base_id, country)
             
+            # ========== Step 5: GEOINT Analysis with Gemini ==========
+            print(f"\n  Starting GEOINT intelligence analysis...")
+            geoint_analysis = analyze_with_gemini(final_path, base_id, country)
+            
+            # ========== Print Analysis Results ==========
+            print(f"\n{'-'*70}")
+            print(f"GEOINT ANALYSIS RESULTS - Base {base_id} ({country})")
+            print(f"{'-'*70}")
+            print(geoint_analysis)
+            print(f"{'-'*70}\n")
+            
+            # ========== Store Results for Saving ==========
+            result_entry = {
+                "base_id": base_id,
+                "country": country,
+                "latitude": latitude,
+                "longitude": longitude,
+                "screenshot_file": os.path.basename(final_path),
+                "geoint_analysis": geoint_analysis
+            }
+            analysis_results.append(result_entry)
+            
             print(f"✓ Base {base_id} completed successfully")
     
     finally:
         # Close the browser
         driver.quit()
     
+    # ========== Save Analysis Results ==========
+    print(f"\n{'='*70}")
+    print(f"SAVING ANALYSIS RESULTS")
+    print(f"{'='*70}")
+    
+    # Save as JSON
+    json_path = save_analysis_to_json(analysis_results)
+    
+    # Save as text report
+    text_path = save_analysis_to_text(analysis_results)
+    
     print(f"\n{'='*70}")
     print(f"✓ Analysis Complete!")
     print(f"{'='*70}")
     print(f"Processed {len(bases)} military bases")
-    print(f"Output location: {os.path.abspath(OUTPUT_DIR)}/")
-    print(f"All screenshots scaled to {SCREENSHOT_WIDTH}px width and converted to JPEG\n")
+    print(f"\n📁 Output Locations:")
+    print(f"   Screenshots: {os.path.abspath(OUTPUT_DIR)}/")
+    print(f"   JSON Data:   {os.path.abspath(json_path)}")
+    print(f"   Text Report: {os.path.abspath(text_path)}")
+    print(f"\n✓ All data saved to {os.path.abspath(DATA_DIR)}/ directory\n")
 
 
 if __name__ == "__main__":
