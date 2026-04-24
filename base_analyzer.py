@@ -41,6 +41,22 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Simple approach: use Google Earth search with coordinates
 GOOGLE_EARTH_URL_TEMPLATE = "https://earth.google.com/web/search/{latitude},{longitude}"
 
+# Structured-output schema for the analyst. `action` is a strict enum so the
+# next step (Selenium dispatcher) can rely on exactly these five values.
+GEOINT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "findings": {"type": "array", "items": {"type": "string"}},
+        "analysis": {"type": "string"},
+        "things_to_continue_analyzing": {"type": "array", "items": {"type": "string"}},
+        "action": {
+            "type": "string",
+            "enum": ["zoom-in", "zoom-out", "move-left", "move-right", "finish"],
+        },
+    },
+    "required": ["findings", "analysis", "things_to_continue_analyzing", "action"],
+}
+
 
 def create_google_earth_url(latitude, longitude):
     """
@@ -256,38 +272,47 @@ def analyze_with_gemini(image_path, base_id, country):
             image_data = image_file.read()
         
         # Create the prompt for GEOINT analysis
-        geoint_prompt = f"""You are a senior Geospatial Intelligence (GEOINT) analyst specializing in satellite imagery analysis for the US military. We have received intelligence that the provided satellite image shows a suspected military base/facility located in {country}.
+        geoint_prompt = f"""You are an expert in understanding satellite imagery and you work for the US army. We got intel that this area is a base/facility of the military of {country}. Analyze this image and respond ONLY with a JSON object containing the following keys:
 
-Your mission is to analyze the image thoroughly and extract actionable intelligence. Guide your analysis by looking for the following specific categories:
+1. 'findings': A list of findings that you think are important for the US army to know, including all man-made structures, military equipment, and infrastructure. We are trying to find which systems, weapons, or equipment are present so focus on that.
+2. 'analysis': A detailed analysis of your findings.
+3. 'things_to_continue_analyzing': A list of things that you think are important to continue analyzing in further images.
+4. 'action': One of ['zoom-in', 'zoom-out', 'move-left', 'move-right', 'finish'] based on what would help you analyze the image or area better.
+- Choose 'zoom-in' if you need to zoom in the image
+- Choose 'zoom-out' if you need more context of the surrounding area or if you are zoomed in too much
+- Choose 'move-left' or 'move-right' if you suspect there are important features just outside the current view
+- Choose 'finish' if you have a complete understanding of the location
 
-1. Infrastructure: Runways, hangars, barracks, bunkers, communications towers, or storage tanks.
-2. Vehicles/Equipment: Aircraft, armored vehicles, transport convoys, or naval vessels.
-3. Defensive Measures: Radar installations, SAM (Surface-to-Air Missile) sites, trenches, or perimeter security.
+Return ONLY the JSON object, no markdown fences, no preamble, no trailing commentary.
 
-Provide detailed observations and assessment for each category found in the image. Be specific about locations, quantities, and any notable patterns or formations."""
-        
-        # Initialize Gemini model
+If imagery is unusable (cloud cover, blank tile, solid color, no visible ground features), set findings=[], put the reason in analysis, and set action='zoom-out'."""
+
         model = genai.GenerativeModel("gemini-2.5-flash")
-        
-        # Send image and prompt to Gemini
+
         response = model.generate_content(
             [
                 geoint_prompt,
-                {
-                    "mime_type": "image/jpeg",
-                    "data": image_data
-                }
-            ]
+                {"mime_type": "image/jpeg", "data": image_data},
+            ],
+            generation_config={
+                "response_mime_type": "application/json",
+                "response_schema": GEOINT_RESPONSE_SCHEMA,
+            },
         )
-        
-        analysis_text = response.text
-        print(f"  ✓ Analysis complete")
-        
-        return analysis_text
-    
+
+        analysis = json.loads(response.text)
+        print(f"  ✓ Analysis complete — action={analysis['action']}, findings={len(analysis['findings'])}")
+
+        return analysis
+
     except Exception as e:
         print(f"  ✗ Error analyzing image with Gemini: {e}")
-        return f"Error: {str(e)}"
+        return {
+            "findings": [],
+            "analysis": f"Error: {e}",
+            "things_to_continue_analyzing": [],
+            "action": "finish",
+        }
 
 
 def save_analysis_to_json(results, filename=None):
@@ -348,7 +373,7 @@ def save_analysis_to_text(results, filename=None):
             f.write(f"\n{'-'*80}\n")
             f.write("GEOINT ANALYSIS:\n")
             f.write(f"{'-'*80}\n")
-            f.write(f"{result['geoint_analysis']}\n")
+            f.write(json.dumps(result['geoint_analysis'], indent=2, ensure_ascii=False) + "\n")
             f.write("\n")
     
     print(f"  ✓ Text report saved: {filepath}")
@@ -411,7 +436,7 @@ def analyze_military_bases():
             print(f"\n{'-'*70}")
             print(f"GEOINT ANALYSIS RESULTS - Base {base_id} ({country})")
             print(f"{'-'*70}")
-            print(geoint_analysis)
+            print(json.dumps(geoint_analysis, indent=2, ensure_ascii=False))
             print(f"{'-'*70}\n")
             
             # ========== Store Results for Saving ==========
