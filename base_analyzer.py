@@ -30,6 +30,7 @@ NUM_ANALYSTS = 8
 OUTPUT_DIR = "screenshots"
 SCREENSHOT_WIDTH = 1024
 DATA_DIR = "data"
+DATA_JSON_PATH = os.path.join(DATA_DIR, "data.json")  # persistent, dedup'd across runs
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # View-navigation parameters. The analyst's `action` mutates a per-base state
@@ -463,6 +464,31 @@ Rules:
         }
 
 
+def load_data_json():
+    """
+    Load the persistent results list from data/data.json.
+    Returns [] if the file does not exist. Raises if the file is malformed —
+    we'd rather fail fast than silently overwrite a user's prior results.
+    """
+    if not os.path.exists(DATA_JSON_PATH):
+        return []
+    with open(DATA_JSON_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_data_json(entries):
+    """
+    Atomically persist the full results list to data/data.json by writing to
+    a sibling tmp file and renaming. Avoids leaving a half-written JSON file
+    if the process is killed mid-write.
+    """
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp_path = DATA_JSON_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, DATA_JSON_PATH)
+
+
 def save_analysis_to_json(results, filename=None):
     """
     Save analysis results to a JSON file.
@@ -554,28 +580,45 @@ def analyze_military_bases():
     os.makedirs(DATA_DIR, exist_ok=True)
     
     csv_path = "military_bases.csv"
-    
+
     # Read bases from CSV
     print(f"Reading first {ROWS_TO_PROCESS} military bases from {csv_path}...")
     bases = read_military_bases_csv(csv_path, ROWS_TO_PROCESS)
-    
-    print(f"Found {len(bases)} bases to process\n")
-    
-    # Initialize results collection
+    print(f"Read {len(bases)} bases from CSV (top {ROWS_TO_PROCESS} rows)")
+
+    # Persistent results: load anything we've analyzed in prior runs and skip
+    # those base_ids this time around.
+    data_entries = load_data_json()
+    existing_ids = {entry["base_id"] for entry in data_entries}
+    if existing_ids:
+        print(f"Found {len(existing_ids)} previously analyzed base(s) in {DATA_JSON_PATH} — will skip them")
+
+    bases_to_process = [b for b in bases if b["id"] not in existing_ids]
+    skipped = len(bases) - len(bases_to_process)
+    if skipped:
+        print(f"Skipping {skipped} base(s) already in data.json")
+    print(f"{len(bases_to_process)} new base(s) to process\n")
+
+    if not bases_to_process:
+        print("Nothing to do — all requested bases are already in data.json. Exiting.")
+        return
+
+    # Per-run snapshot list (timestamped outputs). Distinct from data_entries
+    # which is the cumulative persistent record.
     analysis_results = []
-    
+
     # Initialize Chrome driver
     driver = setup_chrome_driver()
-    
+
     try:
-        for idx, base in enumerate(bases, 1):
+        for idx, base in enumerate(bases_to_process, 1):
             base_id = base['id']
             country = base['country']
             initial_lat = float(base['latitude'])
             initial_lon = float(base['longitude'])
 
             print(f"\n{'='*70}")
-            print(f"[{idx}/{len(bases)}] Processing Base {base_id} ({country})")
+            print(f"[{idx}/{len(bases_to_process)}] Processing Base {base_id} ({country})")
             print(f"{'='*70}")
             print(f"Initial view: lat={initial_lat}, lon={initial_lon}, zoom={INITIAL_ZOOM_RANGE}m")
 
@@ -652,7 +695,14 @@ def analyze_military_bases():
             }
             analysis_results.append(result_entry)
 
+            # Incremental atomic persist: append this base to data.json so a
+            # crash on a later base doesn't lose what we've already done, and
+            # future runs can skip it.
+            data_entries.append(result_entry)
+            save_data_json(data_entries)
+
             print(f"\n✓ Base {base_id} completed — {NUM_ANALYSTS} analysts across {view_idx} distinct views + commander")
+            print(f"  ✓ Persisted to {DATA_JSON_PATH} (cumulative: {len(data_entries)} bases)")
     
     finally:
         # Close the browser
@@ -674,6 +724,7 @@ def analyze_military_bases():
     print(f"{'='*70}")
     print(f"Processed {len(bases)} military bases")
     print(f"\n📁 Output Locations:")
+    print(f"   Persistent:  {os.path.abspath(DATA_JSON_PATH)}  (cumulative across runs)")
     print(f"   Screenshots: {os.path.abspath(OUTPUT_DIR)}/")
     print(f"   JSON Data:   {os.path.abspath(json_path)}")
     print(f"   Text Report: {os.path.abspath(text_path)}")
