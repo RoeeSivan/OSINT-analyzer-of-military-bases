@@ -23,13 +23,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
 
 # Constants
-ROWS_TO_PROCESS = 1
+ROWS_TO_PROCESS = 10
 NUM_ANALYSTS = 8
 OUTPUT_DIR = "screenshots"
 SCREENSHOT_WIDTH = 1024
@@ -46,12 +47,30 @@ MIN_ZOOM_RANGE = 100        # m — prevent tunneling into the ground
 MAX_ZOOM_RANGE = 50000      # m — prevent zooming to orbit
 MOVE_FRACTION = 0.6         # shift longitude by 60% of the current range
 
+# LLM provider switch — single source of truth for both analyst and commander.
+# Flip between "gemini" and "openai" without touching anything else.
+LLM_PROVIDER = "openai"
+
 # Gemini Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not found in .env file")
 
 genai.configure(api_key=GEMINI_API_KEY)
+
+# OpenAI Configuration — used when LLM_PROVIDER="openai".
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ANALYST_MODEL_OPENAI = "gpt-5"
+COMMANDER_MODEL_OPENAI = "gpt-5"
+openai_client = None
+
+if LLM_PROVIDER == "openai":
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY not found in .env (required when LLM_PROVIDER='openai')")
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    print(f"✓ Using OpenAI · analyst={ANALYST_MODEL_OPENAI}, commander={COMMANDER_MODEL_OPENAI}")
+else:
+    print("✓ Using Gemini · analyst=gemini-2.5-flash, commander=gemini-2.5-pro")
 
 # Moondream cloud API — used for: (1) triage before each Gemini call,
 # (2) bounding-box detection for the GUI overlays, (3) re-centering on
@@ -237,6 +256,7 @@ GOOGLE_EARTH_SEARCH_URL_TEMPLATE = (
 # next step (Selenium dispatcher) can rely on exactly these five values.
 GEOINT_RESPONSE_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,  # required for OpenAI strict mode; harmless for Gemini
     "properties": {
         "findings": {"type": "array", "items": {"type": "string"}},
         "analysis": {"type": "string"},
@@ -258,6 +278,7 @@ COMMANDER_MODEL = "gemini-2.5-pro"
 # cleanly onto Streamlit widgets in the final GUI step.
 COMMANDER_RESPONSE_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,  # required for OpenAI strict mode; harmless for Gemini
     "properties": {
         "executive_summary": {"type": "string"},
         "facility_classification": {"type": "string"},
@@ -695,6 +716,81 @@ If imagery is unusable (cloud cover, blank tile, solid color, no visible ground 
         }
 
 
+def analyze_with_openai(image_path, base_id, country, history=None, moondream_context=None):
+    """
+    OpenAI counterpart to analyze_with_gemini — same prompt, same return shape,
+    just routed through gpt-5 vision + JSON-schema-strict mode. Used when
+    LLM_PROVIDER == "openai".
+    """
+    print(f"  Analyzing with OpenAI {ANALYST_MODEL_OPENAI}...")
+
+    try:
+        with open(image_path, "rb") as image_file:
+            image_b64 = base64.b64encode(image_file.read()).decode()
+
+        # Same prompt as the Gemini path so analyst output stays directly comparable.
+        geoint_prompt = f"""You are an expert in understanding satellite imagery and you work for the US army. We got intel that this area is a base/facility of the military of {country}. Analyze this image and respond ONLY with a JSON object containing the following keys:
+
+1. 'findings': A list of findings that you think are important for the US army to know, including all man-made structures, military equipment, and infrastructure. We are trying to find which systems, weapons, or equipment are present so focus on that.
+2. 'analysis': A detailed analysis of your findings.
+3. 'things_to_continue_analyzing': A list of things that you think are important to continue analyzing in further images.
+4. 'action': One of ['zoom-in', 'zoom-out', 'move-left', 'move-right', 'finish'] based on what would help you analyze the image or area better.
+- Choose 'zoom-in' if you need to zoom in the image
+- Choose 'zoom-out' if you need more context of the surrounding area or if you are zoomed in too much
+- Choose 'move-left' or 'move-right' if you suspect there are important features just outside the current view
+- Choose 'finish' if you have a complete understanding of the location
+
+Return ONLY the JSON object, no markdown fences, no preamble, no trailing commentary.
+
+If imagery is unusable (cloud cover, blank tile, solid color, no visible ground features), set findings=[], put the reason in analysis, and set action='zoom-out'."""
+
+        if moondream_context:
+            geoint_prompt += f"\n\nObject detector context:\n{moondream_context}"
+
+        if history:
+            geoint_prompt += (
+                "\n\nHere is the analysis of previous analysts about this area and their "
+                "recommendations. You can use this data but don't use it as fact, think "
+                "for yourself:\n\n"
+                f"{history}"
+            )
+
+        response = openai_client.chat.completions.create(
+            model=ANALYST_MODEL_OPENAI,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": geoint_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                    },
+                ],
+            }],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "geoint_analysis",
+                    "strict": True,
+                    "schema": GEOINT_RESPONSE_SCHEMA,
+                },
+            },
+        )
+
+        analysis = json.loads(response.choices[0].message.content)
+        print(f"  ✓ Analysis complete — action={analysis['action']}, findings={len(analysis['findings'])}")
+        return analysis
+
+    except Exception as e:
+        print(f"  ✗ Error analyzing image with OpenAI: {e}")
+        return {
+            "findings": [],
+            "analysis": f"Error: {e}",
+            "things_to_continue_analyzing": [],
+            "action": "finish",
+        }
+
+
 def run_commander(analysts, country, base_id):
     """
     Synthesize the 8 analysts' reports into a single intelligence product using
@@ -738,6 +834,72 @@ Rules:
             },
         )
         report = json.loads(response.text)
+        print(
+            f"  ✓ Commander report complete — "
+            f"classification={report['facility_classification']}, "
+            f"confidence={report['confidence']}"
+        )
+        return report
+
+    except Exception as e:
+        print(f"  ✗ Error generating commander report: {e}")
+        return {
+            "executive_summary": f"Error: {e}",
+            "facility_classification": "Unknown",
+            "confidence": "low",
+            "key_findings": [],
+            "threat_assessment": f"Commander synthesis failed: {e}",
+            "recommended_next_steps": [],
+            "disagreements_or_uncertainties": [],
+        }
+
+
+def run_commander_openai(analysts, country, base_id):
+    """
+    OpenAI counterpart to run_commander — same prompt, same return shape,
+    routed through gpt-5 with JSON-schema-strict mode. Used when LLM_PROVIDER == "openai".
+    """
+    print(f"  Commander synthesizing {len(analysts)} analyst reports with OpenAI {COMMANDER_MODEL_OPENAI}...")
+
+    transcript = format_history_of_analysts(analysts)
+
+    commander_prompt = f"""You are a senior military intelligence commander. Intel suggests the location in {country} (site ID {base_id}) is an enemy military facility. Eight analysts have independently examined satellite imagery from different zoom levels and positions — each saw a different frame, and later analysts were shown earlier analysts' notes but told not to treat them as fact.
+
+Your job: synthesize their observations into a single authoritative intelligence report a field commander can act on. Analysts may disagree, overfit to small details, or miss the bigger picture. Reconcile the evidence, weight findings by how many analysts corroborated them, and produce a clear assessment.
+
+Here is the full transcript of the analysts' findings (each block is one analyst):
+
+{transcript}
+
+Respond ONLY with a JSON object with these keys:
+- executive_summary: 1-3 sentence tl;dr of what this facility is and why it matters to the US army.
+- facility_classification: short concrete label for the facility type (e.g. "Air Base", "Surface-to-Air Missile Site", "Naval Port", "Radar Station", "Army Garrison", "Storage Depot", "Unknown"). Pick one.
+- confidence: one of ["low", "medium", "high"] — how confident you are in the classification given the evidence.
+- key_findings: 3-7 consolidated findings as single sentences, ordered by military significance (most important first). Consolidate duplicates across analysts.
+- threat_assessment: one paragraph covering offensive/defensive capability, operational readiness indicators, and the reasoning behind your threat judgment.
+- recommended_next_steps: concrete follow-up actions (e.g. "request high-resolution SAR imagery of the eastern perimeter", "monitor hangar activity over 72h for aircraft movement", "cross-reference with SIGINT on frequencies X-Y MHz").
+- disagreements_or_uncertainties: points where analysts diverged or where evidence was ambiguous. If the analysts were fully consistent, return [].
+
+Rules:
+- Do not invent findings not supported by any analyst.
+- A single analyst's isolated claim is weaker evidence than a finding repeated by multiple analysts — weight accordingly.
+- Be specific, not generic. "Possible SAM site" is better than "possible military asset".
+- Return ONLY the JSON object — no markdown fences, no preamble, no trailing commentary."""
+
+    try:
+        response = openai_client.chat.completions.create(
+            model=COMMANDER_MODEL_OPENAI,
+            messages=[{"role": "user", "content": commander_prompt}],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "commander_report",
+                    "strict": True,
+                    "schema": COMMANDER_RESPONSE_SCHEMA,
+                },
+            },
+        )
+        report = json.loads(response.choices[0].message.content)
         print(
             f"  ✓ Commander report complete — "
             f"classification={report['facility_classification']}, "
@@ -884,10 +1046,16 @@ def analyze_military_bases():
                         print(f"  (injecting history from {len(analysts)} prior analyst(s))")
                     if moondream_context:
                         print(f"  (injecting Moondream detection anchors into prompt)")
-                    analysis = analyze_with_gemini(
-                        current_screenshot_path, base_id, country,
-                        history=history, moondream_context=moondream_context,
-                    )
+                    if LLM_PROVIDER == "openai":
+                        analysis = analyze_with_openai(
+                            current_screenshot_path, base_id, country,
+                            history=history, moondream_context=moondream_context,
+                        )
+                    else:
+                        analysis = analyze_with_gemini(
+                            current_screenshot_path, base_id, country,
+                            history=history, moondream_context=moondream_context,
+                        )
                 else:
                     analysis = {
                         "findings": [],
@@ -934,7 +1102,10 @@ def analyze_military_bases():
             print(f"\n{'-'*70}")
             print(f"COMMANDER — Base {base_id} ({country})")
             print(f"{'-'*70}")
-            commander_report = run_commander(analysts, country, base_id)
+            if LLM_PROVIDER == "openai":
+                commander_report = run_commander_openai(analysts, country, base_id)
+            else:
+                commander_report = run_commander(analysts, country, base_id)
             print(json.dumps(commander_report, indent=2, ensure_ascii=False))
 
             result_entry = {

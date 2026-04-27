@@ -10,14 +10,18 @@ Run:
     streamlit run app.py
 """
 
+import html
 import json
 import os
+import re
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
+import altair as alt
 import pydeck as pdk
 import streamlit as st
+from streamlit_image_comparison import image_comparison
 
 DATA_PATH = "data/data.json"
 SCREENSHOT_DIR = "screenshots"
@@ -88,7 +92,79 @@ def screenshot_path(filename: str | None) -> str | None:
     return p if os.path.exists(p) else None
 
 
+def pick_primary_screenshot(base: dict):
+    """Best image to feature in the hero card. Prefer analyst-1 annotated → analyst-1 raw
+    → any annotated → any raw. Returns (path, analyst_dict) or (None, None)."""
+    analysts = base.get("analysts") or []
+    if not analysts:
+        return None, None
+    a1 = analysts[0]
+    p = screenshot_path(a1.get("annotated_screenshot_file")) or screenshot_path(a1.get("screenshot_file"))
+    if p:
+        return p, a1
+    for a in analysts:
+        if (p := screenshot_path(a.get("annotated_screenshot_file"))):
+            return p, a
+    for a in analysts:
+        if (p := screenshot_path(a.get("screenshot_file"))):
+            return p, a
+    return None, None
+
+
+# ---------- search helpers ----------
+
+def base_haystack(base: dict) -> str:
+    """All searchable text from a base entry, lower-cased and concatenated."""
+    cmd = base["commander_report"]
+    parts = [
+        cmd.get("executive_summary", ""),
+        cmd.get("facility_classification", ""),
+        cmd.get("threat_assessment", ""),
+        cmd.get("confidence", ""),
+        base.get("country", ""),
+        str(base.get("base_id", "")),
+        " ".join(cmd.get("key_findings", [])),
+        " ".join(cmd.get("recommended_next_steps", [])),
+        " ".join(cmd.get("disagreements_or_uncertainties", [])),
+    ]
+    for a in base["analysts"]:
+        ana = a.get("analysis", {})
+        parts.append(ana.get("analysis", ""))
+        parts.extend(ana.get("findings", []))
+        parts.extend(ana.get("things_to_continue_analyzing", []))
+        parts.extend(d.get("label", "") for d in a.get("moondream_detections", []))
+    return " ".join(parts).lower()
+
+
+def base_matches(base: dict, query: str) -> bool:
+    return not query.strip() or query.strip().lower() in base_haystack(base)
+
+
+def hl(text, query: str) -> str:
+    """HTML-escape `text` and wrap query matches in a <mark> for highlighting."""
+    if text is None:
+        return ""
+    safe = html.escape(str(text))
+    q = (query or "").strip()
+    if not q:
+        return safe
+    pattern = re.compile(re.escape(q), re.IGNORECASE)
+    return pattern.sub(
+        lambda m: (
+            f'<mark style="background:#f59e0b;color:#0b1220;padding:0 3px;'
+            f'border-radius:2px;font-weight:700;">{m.group(0)}</mark>'
+        ),
+        safe,
+    )
+
+
 # ---------- page config + global CSS ----------
+
+# ---------- session state ----------
+
+if "selected_base_id" not in st.session_state:
+    st.session_state.selected_base_id = None
+
 
 st.set_page_config(
     page_title="OSINT GEOINT Analyzer",
@@ -179,6 +255,62 @@ section[data-testid="stSidebar"] {
   border-radius: 6px; padding: 8px 12px;
 }
 .legend-row { font-family: ui-monospace, monospace; font-size: 0.78rem; color: var(--muted); margin: 4px 0; }
+
+/* Top threats leaderboard */
+.priority-card {
+  background: linear-gradient(135deg, #1a0f1a 0%, #2a1015 100%);
+  border: 1px solid #ef4444;
+  border-left: 4px solid #ef4444;
+  border-radius: 8px;
+  padding: 22px 26px;
+  margin: 12px 0 22px 0;
+  box-shadow: 0 0 24px rgba(239, 68, 68, 0.15);
+}
+.priority-tag {
+  display: inline-block;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid #ef4444;
+  padding: 3px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.threat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin: 6px 0;
+  height: 100%;
+}
+.rank-badge {
+  display: inline-block;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid var(--accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-right: 8px;
+}
+.score-badge {
+  display: inline-block;
+  font-family: ui-monospace, monospace;
+  font-size: 0.74rem;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  padding: 3px 10px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -225,15 +357,27 @@ m4.metric(
 with st.sidebar:
     st.markdown("### 🎯 Filters")
 
-    countries = sorted({b["country"] for b in data})
-    country_options = ["All countries"] + countries
+    search_query = st.text_input(
+        "🔍 Search",
+        placeholder="missile, hangar, naval...",
+        help="Free-text match against findings, analysis, classifications, and detection labels.",
+    )
+
+    # Filter bases by query first, so country/base dropdowns only offer matching options.
+    matching_data = [b for b in data if base_matches(b, search_query)] if search_query.strip() else data
+
+    available_countries = sorted({b["country"] for b in matching_data})
+    country_options = ["All countries"] + available_countries
     country_choice = st.selectbox("Country", country_options, index=0)
 
-    if country_choice == "All countries":
-        bases_in_scope = data
+    if not matching_data:
+        bases_in_scope = []
+        selected_base = None
+    elif country_choice == "All countries":
+        bases_in_scope = matching_data
         selected_base = None
     else:
-        bases_in_scope = [b for b in data if b["country"] == country_choice]
+        bases_in_scope = [b for b in matching_data if b["country"] == country_choice]
         base_labels = [
             f"#{b['base_id']} — {b['commander_report']['facility_classification']} "
             f"({b['commander_report']['confidence']})"
@@ -245,6 +389,13 @@ with st.sidebar:
             format_func=lambda i: base_labels[i],
         )
         selected_base = bases_in_scope[idx]
+    
+    # Override with session state if a base was clicked from the overview
+    if st.session_state.selected_base_id is not None:
+        for b in data:
+            if b['base_id'] == st.session_state.selected_base_id:
+                selected_base = b
+                break
 
     st.markdown("---")
     st.markdown("### Legend")
@@ -266,8 +417,95 @@ with st.sidebar:
 
 # ---------- overview mode ----------
 
-def render_overview(bases: list):
-    st.markdown('<div class="section-title">Strategic Overview</div>', unsafe_allow_html=True)
+CONFIDENCE_WEIGHT = {"high": 3, "medium": 2, "low": 1}
+
+
+def threat_score(base: dict) -> int:
+    cmd = base["commander_report"]
+    weight = CONFIDENCE_WEIGHT.get(cmd.get("confidence", "low"), 1)
+    return weight * len(cmd.get("key_findings", []))
+
+
+def render_top_threats(bases: list, query: str = ""):
+    if not bases:
+        return
+    ranked = sorted(bases, key=threat_score, reverse=True)
+
+    st.markdown(
+        '<div class="section-title">Top Threats · Ranked by Confidence × Findings</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Priority target — top 1, hero card with red accent.
+    top = ranked[0]
+    cmd = top["commander_report"]
+    detection_count = sum(len(a["moondream_detections"]) for a in top["analysts"])
+    st.markdown(
+        f"""
+<div class="priority-card">
+  <div class="priority-tag">⚠ PRIORITY TARGET · RANK #01</div>
+  <div class="kv">{country_label(top['country'])} · BASE #{top['base_id']} ·
+    LAT {float(top['initial_latitude']):.4f}, LON {float(top['initial_longitude']):.4f}</div>
+  <div style="display:flex;align-items:center;gap:12px;margin:10px 0 4px 0;flex-wrap:wrap;">
+    <div class="classification">{hl(cmd['facility_classification'], query)}</div>
+    {confidence_pill(cmd['confidence'])}
+    <span class="score-badge">THREAT SCORE · {threat_score(top)}</span>
+  </div>
+  <div class="exec-summary">{hl(cmd['executive_summary'], query)}</div>
+  <div class="muted" style="margin-top:12px;">
+    {len(cmd.get('key_findings', []))} key findings ·
+    {detection_count} detections ·
+    {len(top['analysts'])} analysts
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    # Ranks 2-4 — compact threat cards in a row.
+    next_tier = ranked[1:4]
+    if next_tier:
+        cols = st.columns(len(next_tier))
+        for i, b in enumerate(next_tier):
+            cmd_i = b["commander_report"]
+            with cols[i]:
+                st.markdown(
+                    f"""
+<div class="threat-card">
+  <span class="rank-badge">#{i + 2:02d}</span>
+  {confidence_pill(cmd_i['confidence'])}
+  <div class="kv" style="margin-top:8px;">{country_label(b['country'])} · BASE #{b['base_id']}</div>
+  <div class="classification" style="font-size:1.15rem;margin:6px 0;">{hl(cmd_i['facility_classification'], query)}</div>
+  <div class="muted">score {threat_score(b)} ·
+    {len(cmd_i.get('key_findings', []))} findings ·
+    {sum(len(a['moondream_detections']) for a in b['analysts'])} detections
+  </div>
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
+
+    # Remaining bases — collapsible compact list.
+    rest = ranked[4:]
+    if rest:
+        with st.expander(f"Other facilities ({len(rest)})"):
+            for i, b in enumerate(rest, start=5):
+                cmd_i = b["commander_report"]
+                st.markdown(
+                    f'<div class="kv" style="padding:6px 0;border-bottom:1px dashed var(--border);">'
+                    f'<span class="rank-badge">#{i:02d}</span> '
+                    f'{country_label(b["country"])} · BASE #{b["base_id"]} · '
+                    f'<b>{hl(cmd_i["facility_classification"], query)}</b> · '
+                    f'<span style="color:var(--muted);">score {threat_score(b)} · '
+                    f'{cmd_i["confidence"]} confidence · '
+                    f'{len(cmd_i.get("key_findings", []))} findings</span></div>',
+                    unsafe_allow_html=True,
+                )
+
+
+def render_overview(bases: list, query: str = ""):
+    render_top_threats(bases, query)
+    st.markdown('<div class="section-title">Global Distribution</div>', unsafe_allow_html=True)
 
     # Map of all bases
     if bases:
@@ -331,13 +569,15 @@ def render_overview(bases: list):
         for i, b in enumerate(country_bases):
             with cols[i % len(cols)]:
                 cmd = b["commander_report"]
-                st.markdown(
-                    f"""
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    st.markdown(
+                        f"""
 <div class="card">
   <div class="kv"><b>BASE #{b['base_id']}</b></div>
-  <div class="classification" style="margin:8px 0 6px 0;">{cmd['facility_classification']}</div>
+  <div class="classification" style="margin:8px 0 6px 0;">{hl(cmd['facility_classification'], query)}</div>
   {confidence_pill(cmd['confidence'])}
-  <div class="exec-summary">{cmd['executive_summary']}</div>
+  <div class="exec-summary">{hl(cmd['executive_summary'], query)}</div>
   <div class="muted" style="margin-top:10px;">
     {len(b['analysts'])} analysts ·
     {sum(len(a['moondream_detections']) for a in b['analysts'])} detections ·
@@ -345,29 +585,53 @@ def render_overview(bases: list):
   </div>
 </div>
 """,
-                    unsafe_allow_html=True,
-                )
+                        unsafe_allow_html=True,
+                    )
+                with col2:
+                    if st.button("→", key=f"view_base_{b['base_id']}", help=f"View BASE #{b['base_id']}"):
+                        st.session_state.selected_base_id = b['base_id']
+                        st.rerun()
 
 
 # ---------- base detail mode ----------
 
-def render_base_detail(base: dict):
+def render_base_detail(base: dict, query: str = ""):
     cmd = base["commander_report"]
+    
+    # Back button
+    if st.button("← Back to overview"):
+        st.session_state.selected_base_id = None
+        st.rerun()
 
-    # Hero card
-    st.markdown(
-        f"""
+    # Hero card — text left, primary screenshot right
+    hero_text, hero_image = st.columns([3, 2], gap="medium")
+    with hero_text:
+        st.markdown(
+            f"""
 <div class="card">
   <div class="kv">{country_label(base['country'])} · BASE #{base['base_id']} · LAT {float(base['initial_latitude']):.4f}, LON {float(base['initial_longitude']):.4f}</div>
   <div style="display:flex;align-items:center;gap:14px;margin-top:8px;flex-wrap:wrap;">
-    <div class="classification">{cmd['facility_classification']}</div>
+    <div class="classification">{hl(cmd['facility_classification'], query)}</div>
     {confidence_pill(cmd['confidence'])}
   </div>
-  <div class="exec-summary">{cmd['executive_summary']}</div>
+  <div class="exec-summary">{hl(cmd['executive_summary'], query)}</div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
+    with hero_image:
+        primary_path, primary_analyst = pick_primary_screenshot(base)
+        if primary_path:
+            st.image(primary_path, use_container_width=True)
+            if primary_analyst:
+                zoom = primary_analyst["state_when_analyzed"]["zoom"]
+                annot_label = " · annotated" if primary_path.endswith("_annotated.jpg") else ""
+                st.caption(f"View {primary_analyst['view_idx']} · zoom={int(zoom)}m{annot_label}")
+        else:
+            st.markdown(
+                '<div class="placeholder-img">no preview available</div>',
+                unsafe_allow_html=True,
+            )
 
     # Stats strip
     s1, s2, s3, s4 = st.columns(4)
@@ -376,29 +640,148 @@ def render_base_detail(base: dict):
     s3.metric("Moondream detections", sum(len(a["moondream_detections"]) for a in base["analysts"]))
     s4.metric("Disagreements flagged", len(cmd.get("disagreements_or_uncertainties", [])))
 
-    # Map
-    st.markdown('<div class="section-title">Location</div>', unsafe_allow_html=True)
-    deck = pdk.Deck(
-        layers=[
-            pdk.Layer(
-                "ScatterplotLayer",
-                data=[{"lat": float(base["initial_latitude"]), "lon": float(base["initial_longitude"])}],
-                get_position=["lon", "lat"],
-                get_color=[245, 158, 11, 230],
-                get_radius=400,
-                radius_min_pixels=10,
-                radius_max_pixels=40,
+    # Detection Profile — aggregated bar chart of class counts across all 8 analysts
+    st.markdown(
+        '<div class="section-title">Detection Profile · objects detected across 8 analysts</div>',
+        unsafe_allow_html=True,
+    )
+    class_counts = Counter(
+        d["label"]
+        for a in base["analysts"]
+        for d in a.get("moondream_detections", [])
+    )
+    if class_counts:
+        chart_rows = [{"class": k, "count": v} for k, v in class_counts.most_common()]
+        chart = (
+            alt.Chart(alt.Data(values=chart_rows))
+            .mark_bar(color="#f59e0b", cornerRadiusEnd=2)
+            .encode(
+                x=alt.X(
+                    "count:Q",
+                    title="detections",
+                    axis=alt.Axis(labelColor="#94a3b8", titleColor="#94a3b8", grid=False),
+                ),
+                y=alt.Y(
+                    "class:N",
+                    sort="-x",
+                    title=None,
+                    axis=alt.Axis(labelColor="#e5e7eb", labelFontSize=12),
+                ),
+                tooltip=[
+                    alt.Tooltip("class:N", title="class"),
+                    alt.Tooltip("count:Q", title="detections"),
+                ],
             )
-        ],
+            .properties(height=min(320, 26 * len(class_counts) + 40), background="transparent")
+            .configure_view(strokeWidth=0)
+            .configure_axis(domain=False)
+        )
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        st.markdown(
+            '<div class="muted">No Moondream detections logged for this base.</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Investigation trail map: PathLayer + numbered ScatterplotLayer + TextLayer
+    st.markdown(
+        '<div class="section-title">Investigation Trail · Camera Path Across 8 Analysts</div>',
+        unsafe_allow_html=True,
+    )
+
+    trail_points = []
+    for a in base["analysts"]:
+        s = a["state_when_analyzed"]
+        action = a["analysis"].get("action", "finish")
+        color_hex = ACTION_COLORS.get(action, "#64748b")
+        trail_points.append({
+            "lat": float(s["lat"]),
+            "lon": float(s["lon"]),
+            "analyst": a["analyst_num"],
+            "label": str(a["analyst_num"]),
+            "zoom_m": int(s["zoom"]),
+            "action": action,
+            "color": [
+                int(color_hex[1:3], 16),
+                int(color_hex[3:5], 16),
+                int(color_hex[5:7], 16),
+                230,
+            ],
+        })
+
+    path_data = [{"path": [[p["lon"], p["lat"]] for p in trail_points]}]
+
+    path_layer = pdk.Layer(
+        "PathLayer",
+        data=path_data,
+        get_path="path",
+        get_color=[245, 158, 11, 180],
+        get_width=3,
+        width_min_pixels=2,
+        width_max_pixels=4,
+    )
+
+    scatter_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=trail_points,
+        get_position=["lon", "lat"],
+        get_color="color",
+        get_radius=60,
+        radius_min_pixels=14,
+        radius_max_pixels=22,
+        pickable=True,
+        stroked=True,
+        get_line_color=[255, 255, 255, 220],
+        line_width_min_pixels=1,
+    )
+
+    text_layer = pdk.Layer(
+        "TextLayer",
+        data=trail_points,
+        get_position=["lon", "lat"],
+        get_text="label",
+        get_size=14,
+        get_color=[255, 255, 255, 255],
+        get_pixel_offset=[0, -22],
+    )
+
+    avg_lat = sum(p["lat"] for p in trail_points) / len(trail_points)
+    avg_lon = sum(p["lon"] for p in trail_points) / len(trail_points)
+    # Zoom heuristic: tighter spread → zoom in further. Egypt 147's stuck-at-one-coord
+    # case still renders fine because the marker stack is visible at any zoom.
+    span = max(
+        max(p["lat"] for p in trail_points) - min(p["lat"] for p in trail_points),
+        max(p["lon"] for p in trail_points) - min(p["lon"] for p in trail_points),
+    )
+    if span < 0.001:
+        view_zoom = 16
+    elif span < 0.01:
+        view_zoom = 14
+    elif span < 0.05:
+        view_zoom = 12
+    else:
+        view_zoom = 10
+
+    trail_deck = pdk.Deck(
+        layers=[path_layer, scatter_layer, text_layer],
         initial_view_state=pdk.ViewState(
-            latitude=float(base["initial_latitude"]),
-            longitude=float(base["initial_longitude"]),
-            zoom=10,
-            pitch=30,
+            latitude=avg_lat,
+            longitude=avg_lon,
+            zoom=view_zoom,
+            pitch=35,
         ),
         map_style="dark",
+        tooltip={
+            "html": "<b>Analyst {analyst}</b><br/>zoom: {zoom_m} m<br/>action chosen: <i>{action}</i>",
+            "style": {"backgroundColor": "#0b1220", "color": "#e5e7eb", "fontFamily": "ui-monospace, monospace"},
+        },
     )
-    st.pydeck_chart(deck, use_container_width=True)
+    st.pydeck_chart(trail_deck, use_container_width=True)
+    st.markdown(
+        '<div class="muted">Numbered markers = analyst sequence. Marker color = action that '
+        'analyst chose for the next view (see legend in sidebar). Amber line = camera path.</div>',
+        unsafe_allow_html=True,
+    )
 
     # Commander section
     st.markdown('<div class="section-title">Commander Synthesis</div>', unsafe_allow_html=True)
@@ -410,7 +793,7 @@ def render_base_detail(base: dict):
             for i, f in enumerate(cmd["key_findings"], 1):
                 st.markdown(
                     f'<div class="finding-row"><div class="finding-num">{i:02d}</div>'
-                    f'<div class="finding-text">{f}</div></div>',
+                    f'<div class="finding-text">{hl(f, query)}</div></div>',
                     unsafe_allow_html=True,
                 )
         else:
@@ -419,7 +802,7 @@ def render_base_detail(base: dict):
         st.markdown("&nbsp;", unsafe_allow_html=True)
         st.markdown("**Threat assessment**")
         st.markdown(
-            f'<div class="threat-block">{cmd.get("threat_assessment", "—")}</div>',
+            f'<div class="threat-block">{hl(cmd.get("threat_assessment", "—"), query)}</div>',
             unsafe_allow_html=True,
         )
 
@@ -427,7 +810,7 @@ def render_base_detail(base: dict):
         st.markdown("**Recommended next steps**")
         if cmd.get("recommended_next_steps"):
             for step in cmd["recommended_next_steps"]:
-                st.markdown(f"• {step}")
+                st.markdown(f"• {hl(step, query)}", unsafe_allow_html=True)
         else:
             st.markdown('<div class="muted">None.</div>', unsafe_allow_html=True)
 
@@ -437,7 +820,7 @@ def render_base_detail(base: dict):
             disagreements = cmd.get("disagreements_or_uncertainties", [])
             if disagreements:
                 for d in disagreements:
-                    st.markdown(f"• {d}")
+                    st.markdown(f"• {hl(d, query)}", unsafe_allow_html=True)
             else:
                 st.markdown('<div class="muted">Analysts converged — no disagreements logged.</div>', unsafe_allow_html=True)
 
@@ -446,10 +829,10 @@ def render_base_detail(base: dict):
     tabs = st.tabs([f"Analyst {a['analyst_num']}" for a in base["analysts"]])
     for tab, analyst in zip(tabs, base["analysts"]):
         with tab:
-            render_analyst(analyst)
+            render_analyst(analyst, query)
 
 
-def render_analyst(a: dict):
+def render_analyst(a: dict, query: str = ""):
     state = a["state_when_analyzed"]
     analysis = a["analysis"]
     raw = screenshot_path(a.get("screenshot_file"))
@@ -469,26 +852,26 @@ def render_analyst(a: dict):
         unsafe_allow_html=True,
     )
 
-    # Image columns
-    col_raw, col_annot = st.columns(2)
-    with col_raw:
-        st.caption("Satellite frame")
-        if raw:
-            st.image(raw, use_container_width=True)
-        else:
-            st.markdown(
-                '<div class="placeholder-img">— image not found —</div>',
-                unsafe_allow_html=True,
-            )
-    with col_annot:
-        st.caption(f"Moondream annotated · {len(a['moondream_detections'])} object(s)")
-        if annotated:
-            st.image(annotated, use_container_width=True)
-        else:
-            st.markdown(
-                '<div class="placeholder-img">— no annotations —</div>',
-                unsafe_allow_html=True,
-            )
+    # Image: comparison slider when both raw + annotated exist; single image otherwise.
+    if raw and annotated:
+        st.caption(
+            f"Drag the divider · left = satellite frame · right = Moondream annotated "
+            f"({len(a['moondream_detections'])} object(s))"
+        )
+        # Display images side-by-side in full width
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(raw, caption="Raw satellite frame", use_container_width=True)
+        with col2:
+            st.image(annotated, caption=f"Annotated ({len(a['moondream_detections'])} objects)", use_container_width=True)
+    elif raw:
+        st.caption("Satellite frame · (no Moondream annotations for this view)")
+        st.image(raw, use_container_width=True)
+    else:
+        st.markdown(
+            '<div class="placeholder-img">— image not found —</div>',
+            unsafe_allow_html=True,
+        )
 
     # Findings + analysis text
     f1, f2 = st.columns([3, 2])
@@ -498,7 +881,7 @@ def render_analyst(a: dict):
             for i, f in enumerate(analysis["findings"], 1):
                 st.markdown(
                     f'<div class="finding-row"><div class="finding-num">{i:02d}</div>'
-                    f'<div class="finding-text">{f}</div></div>',
+                    f'<div class="finding-text">{hl(f, query)}</div></div>',
                     unsafe_allow_html=True,
                 )
         else:
@@ -507,7 +890,7 @@ def render_analyst(a: dict):
         st.markdown("&nbsp;", unsafe_allow_html=True)
         st.markdown("**Analyst commentary**")
         st.markdown(
-            f'<div class="threat-block">{analysis.get("analysis", "—")}</div>',
+            f'<div class="threat-block">{hl(analysis.get("analysis", "—"), query)}</div>',
             unsafe_allow_html=True,
         )
 
@@ -516,7 +899,7 @@ def render_analyst(a: dict):
             todos = analysis.get("things_to_continue_analyzing", [])
             if todos:
                 for t in todos:
-                    st.markdown(f"• {t}")
+                    st.markdown(f"• {hl(t, query)}", unsafe_allow_html=True)
             else:
                 st.markdown('<div class="muted">Nothing flagged for follow-up.</div>', unsafe_allow_html=True)
 
@@ -525,10 +908,22 @@ def render_analyst(a: dict):
 
 # ---------- dispatch ----------
 
-if selected_base is None:
-    render_overview(bases_in_scope)
+q = search_query.strip()
+if q:
+    st.info(
+        f"🔍 Showing **{len(bases_in_scope)}** of **{len(data)}** base(s) matching `{q}`",
+        icon="🔍",
+    )
+
+# If a base was selected via clickable card, show it regardless of search/filter
+if st.session_state.selected_base_id is not None and selected_base is not None:
+    render_base_detail(selected_base, q)
+elif not bases_in_scope:
+    st.warning(f"No bases match `{q}`. Clear the search to see all data.")
+elif selected_base is None:
+    render_overview(bases_in_scope, q)
 else:
-    render_base_detail(selected_base)
+    render_base_detail(selected_base, q)
 
 
 # ---------- raw JSON ----------
