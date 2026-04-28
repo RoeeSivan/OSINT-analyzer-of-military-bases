@@ -1,0 +1,686 @@
+@import url('https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&display=swap');
+
+:root {
+  --paper:       #f4ecd8;
+  --paper-deep:  #ebe1c3;
+  --paper-edge:  #d4c8a4;
+  --ink:         #1a1410;
+  --ink-soft:    #3d342c;
+  --ash:         #6b6357;
+  --blood:       #8b1a1a;
+  --blood-soft:  #b54545;
+  --rust:        #a14a2c;
+  --brass:       #a07a2c;
+  --slate:       #2c3a4a;
+  --olive:       #4a5024;
+  --rule:        rgba(26, 20, 16, 0.18);
+}
+
+/* ========== BASE ========== */
+html, body, .stApp {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(139, 26, 26, 0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(160, 122, 44, 0.05) 0%, transparent 60%),
+    repeating-linear-gradient(180deg, transparent 0, transparent 38px, rgba(26, 20, 16, 0.025) 38px, rgba(26, 20, 16, 0.025) 39px),
+    linear-gradient(180deg, var(--paper) 0%, var(--paper-deep) 100%) !important;
+  background-attachment: fixed !important;
+  color: var(--ink) !important;
+}
+/* Paper grain noise overlay across whole app */
+.stApp::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.10 0 0 0 0 0.08 0 0 0 0 0.06 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.32;
+  mix-blend-mode: multiply;
+}
+/* Foxing — subtle aged-paper stains in corners */
+.stApp::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(circle 200px at 8% 95%, rgba(160, 122, 44, 0.10), transparent 60%),
+    radial-gradient(circle 240px at 95% 4%, rgba(139, 26, 26, 0.06), transparent 60%);
+}
+
+/* All Streamlit body text → ink on paper */
+.stApp, .stApp p, .stApp li, .stApp span, .stApp div,
+.stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span,
+[data-testid="stText"], [data-testid="stMarkdownContainer"] p {
+  color: var(--ink);
+  font-family: Georgia, 'Garamond', Georgia, serif;
+}
+.stMarkdown p { font-size: 1.05rem; line-height: 1.55; }
+
+/* Streamlit headings */
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4,
+.stMarkdown h5, .stMarkdown h6, h1, h2, h3 {
+  font-family: Georgia, serif;
+  color: var(--ink) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.005em;
+}
+
+/* ========== HEADER MASTHEAD ========== */
+.hero-title {
+  font-family: Georgia, serif;
+  font-weight: 900;
+  font-size: 4rem;
+  letter-spacing: -0.015em;
+  line-height: 0.95;
+  color: var(--ink);
+  text-transform: none;
+  border: none;
+  padding: 0;
+  margin: 0 0 6px 0;
+  position: relative;
+}
+.hero-title::before {
+  content: 'TOP SECRET // HUMINT // NOFORN';
+  display: block;
+  font-family: 'Courier New', monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.22em;
+  color: var(--blood);
+  margin-bottom: 18px;
+  padding: 5px 12px;
+  border-top: 2px solid var(--blood);
+  border-bottom: 2px solid var(--blood);
+  width: fit-content;
+}
+.hero-title::after {
+  content: '';
+  display: block;
+  margin-top: 10px;
+  height: 4px;
+  background: linear-gradient(180deg, var(--ink) 0 1px, transparent 1px 3px, var(--ink) 3px 4px);
+}
+.hero-sub {
+  font-family: 'Courier New', monospace;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+
+/* ========== CARDS — folded paper memos ========== */
+.card {
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-edge);
+  border-left: 4px double var(--blood);
+  border-radius: 0;
+  padding: 26px 32px 24px 32px;
+  margin: 14px 0 26px 0;
+  position: relative;
+  box-shadow:
+    0 1px 0 rgba(255, 252, 240, 0.6) inset,
+    0 8px 28px -18px rgba(26, 20, 16, 0.45),
+    0 2px 4px -2px rgba(26, 20, 16, 0.18);
+}
+.card::before, .card::after {
+  content: ''; position: absolute;
+  width: 16px; height: 16px;
+  border: 1px solid var(--ink); opacity: 0.5;
+}
+.card::before { top: 7px; left: 7px; border-right: 0; border-bottom: 0; }
+.card::after  { bottom: 7px; right: 7px; border-left: 0; border-top: 0; }
+
+/* ========== CLICKABLE CARDS ========== */
+.clickable-card {
+  display: block;
+  position: relative;
+}
+.clickable-card .card {
+  transition:
+    transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-left-color 0.28s ease,
+    border-left-width 0.28s ease;
+}
+.clickable-card:hover .card {
+  transform: translateY(-6px);
+  box-shadow:
+    0 1px 0 rgba(255, 252, 240, 0.6) inset,
+    0 22px 44px -16px rgba(26, 20, 16, 0.55),
+    0 4px 8px -2px rgba(26, 20, 16, 0.22) !important;
+  border-left-color: var(--blood);
+  border-left-width: 6px;
+}
+.clickable-card .card .card-corner-mark {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 0 18px 18px 0;
+  border-color: transparent var(--blood) transparent transparent;
+  opacity: 0;
+  transform: translate(4px, -4px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+.clickable-card:hover .card .card-corner-mark {
+  opacity: 1;
+  transform: translate(0, 0);
+}
+
+/* ========== FILTER BAR ========== */
+.filter-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 28px 0 8px 0;
+  padding: 0 2px;
+}
+.filter-bar-title {
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border-left: 3px solid var(--blood);
+  padding: 2px 0 2px 10px;
+}
+.filter-bar-count {
+  font-family: 'Courier New', monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-edge);
+  border-left: 3px solid var(--brass);
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.filter-bar-count.is-filtered {
+  border-left-color: var(--blood);
+  color: var(--blood);
+}
+
+/* ========== SECTION DIVIDERS ========== */
+.section-title {
+  font-family: Georgia, serif;
+  font-weight: 700;
+  font-size: 1.55rem;
+  color: var(--ink);
+  letter-spacing: 0.005em;
+  margin: 40px 0 14px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ink);
+  text-transform: none;
+  position: relative;
+}
+.section-title::after {
+  content: ''; display: block;
+  height: 1px; background: var(--ink);
+  margin-top: 3px;
+}
+
+/* ========== HEAD CONTENT ========== */
+.classification {
+  font-family: Georgia, serif;
+  font-weight: 900;
+  font-size: 2.4rem;
+  letter-spacing: -0.005em;
+  line-height: 1.05;
+  color: var(--ink);
+  text-transform: uppercase;
+}
+.exec-summary {
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 1.18rem;
+  line-height: 1.55;
+  color: var(--ink);
+  border-left: 3px double var(--blood);
+  padding: 4px 0 4px 18px;
+  margin-top: 16px;
+  background: transparent;
+  border-radius: 0;
+}
+.kv {
+  font-family: 'Courier New', monospace;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.kv b { color: var(--blood); font-weight: 400; }
+
+/* ========== THREAT BLOCK — pull quote with drop quote ========== */
+.threat-block {
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 1.08rem;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  border-left: 3px double var(--blood);
+  padding: 16px 22px 14px 26px;
+  margin: 8px 0;
+  border-radius: 0;
+  position: relative;
+}
+.threat-block::before {
+  content: '\\201C';
+  position: absolute;
+  font-family: Georgia, serif;
+  font-size: 4.5rem;
+  color: var(--blood);
+  opacity: 0.18;
+  top: -14px; left: 8px;
+  line-height: 1;
+}
+
+/* ========== FINDINGS — Roman numeral list ========== */
+.finding-row {
+  display: flex; gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule);
+  align-items: baseline;
+}
+.finding-num {
+  font-family: Georgia, serif;
+  color: var(--blood);
+  font-weight: 700;
+  min-width: 38px;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+}
+.finding-text {
+  color: var(--ink); flex: 1;
+  font-family: Georgia, serif;
+  font-size: 1.04rem;
+  line-height: 1.5;
+}
+
+.muted {
+  color: var(--ash);
+  font-family: Georgia, serif;
+  font-size: 0.96rem;
+  font-style: italic;
+}
+
+.placeholder-img {
+  border: 1px dashed var(--paper-edge);
+  background: var(--paper);
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--ash);
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ========== PRIORITY TARGET — RED STAMP ENVELOPE ========== */
+.priority-card {
+  background:
+    linear-gradient(135deg, rgba(139, 26, 26, 0.05) 0%, transparent 50%),
+    var(--paper-deep);
+  border: 2px solid var(--blood);
+  border-radius: 0;
+  padding: 30px 36px 26px 36px;
+  margin: 16px 0 30px 0;
+  position: relative;
+  box-shadow:
+    0 0 0 6px var(--paper),
+    0 0 0 7px var(--blood),
+    0 14px 36px -18px rgba(26, 20, 16, 0.5);
+}
+.priority-card::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.10 0 0 0 0 0.10 0 0 0 0.5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.06;
+  mix-blend-mode: multiply;
+}
+.priority-tag {
+  display: inline-block;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.2em;
+  color: var(--blood);
+  background: var(--paper);
+  border: 2px solid var(--blood);
+  padding: 5px 14px 4px 14px;
+  border-radius: 0;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  position: relative;
+  transform: rotate(-1.2deg);
+  box-shadow:
+    0 0 0 1px var(--paper),
+    0 1px 0 var(--paper-edge);
+}
+
+/* ========== THREAT CARD — desk memo ========== */
+.threat-card {
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-edge);
+  border-top: 3px double var(--blood);
+  border-radius: 0;
+  padding: 18px 22px;
+  margin: 6px 0;
+  height: 100%;
+  position: relative;
+}
+.rank-badge {
+  display: inline-block;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--blood);
+  background: var(--paper);
+  border: 1px solid var(--blood);
+  padding: 2px 10px;
+  border-radius: 0;
+  margin-right: 8px;
+}
+.score-badge {
+  display: inline-block;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  border-bottom-width: 3px;
+  padding: 2px 10px;
+  border-radius: 0;
+  margin-left: 6px;
+}
+
+/* ========== SIDEBAR — hidden ========== */
+section[data-testid="stSidebar"] { display: none !important; }
+button[data-testid="stSidebarCollapsedControl"] { display: none !important; }
+[data-testid="stAppViewContainer"] > .main { margin-left: 0 !important; }
+
+/* ========== METRICS — stamped paper card ========== */
+[data-testid="stMetric"] {
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  border-left: 3px solid var(--blood);
+  border-radius: 0;
+  padding: 12px 16px;
+  position: relative;
+}
+[data-testid="stMetricValue"] {
+  font-family: Georgia, serif;
+  font-weight: 900 !important;
+  color: var(--ink) !important;
+  font-size: 2.2rem !important;
+  line-height: 1 !important;
+}
+[data-testid="stMetricLabel"] p,
+[data-testid="stMetricLabel"] {
+  font-family: 'Courier New', monospace !important;
+  color: var(--ink-soft) !important;
+  font-size: 0.74rem !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+}
+
+/* ========== TABS — file tabs on a folder ========== */
+.stTabs [data-baseweb="tab-list"] {
+  border-bottom: 1px solid var(--ink);
+  gap: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+  font-family: 'Courier New', monospace !important;
+  font-size: 0.85rem !important;
+  letter-spacing: 0.1em !important;
+  color: var(--ink-soft) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-bottom: none !important;
+  padding: 6px 14px !important;
+  text-transform: uppercase;
+}
+.stTabs [data-baseweb="tab"]:hover {
+  color: var(--blood) !important;
+  background: rgba(139, 26, 26, 0.04) !important;
+}
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+  color: var(--blood) !important;
+  background: var(--paper) !important;
+  border: 1px solid var(--ink) !important;
+  border-bottom: 1px solid var(--paper) !important;
+  position: relative;
+  top: 1px;
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+.stTabs [data-baseweb="tab-border"] { display: none !important; }
+
+/* ========== INPUTS ========== */
+.stTextInput input,
+.stTextInput input[type="text"] {
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-bottom: 2px solid var(--ink) !important;
+  border-radius: 0 !important;
+  font-family: 'Courier New', monospace !important;
+  color: var(--ink) !important;
+  font-size: 0.92rem !important;
+}
+.stTextInput input::placeholder {
+  color: var(--ash) !important;
+  font-style: italic;
+}
+
+[data-baseweb="select"] > div {
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-bottom: 2px solid var(--ink) !important;
+  border-radius: 0 !important;
+  font-family: Georgia, serif !important;
+  color: var(--ink) !important;
+}
+[data-baseweb="select"] [role="listbox"] { background: var(--paper) !important; }
+[data-baseweb="select"] [role="option"] {
+  font-family: Georgia, serif !important;
+  color: var(--ink) !important;
+}
+[data-baseweb="select"] [role="option"]:hover {
+  background: rgba(139, 26, 26, 0.08) !important;
+}
+
+/* Toggle / checkbox text */
+[data-testid="stCheckbox"] label, [data-testid="stToggle"] label,
+[data-testid="stCheckbox"] *, [data-testid="stToggle"] * {
+  color: var(--ink) !important;
+  font-family: 'Courier New', monospace !important;
+  font-size: 0.84rem !important;
+  letter-spacing: 0.05em;
+}
+
+/* Captions — typewriter footnotes */
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {
+  color: var(--ink-soft) !important;
+  font-family: 'Courier New', monospace !important;
+  font-size: 0.76rem !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase;
+}
+
+/* Buttons — file-stamped - always visible */
+.stButton button, button[kind="secondary"], button[kind="primary"] {
+  background: var(--paper) !important;
+  border: 2px solid var(--ink) !important;
+  border-bottom-width: 3px !important;
+  border-radius: 0 !important;
+  font-family: 'Courier New', monospace !important;
+  color: var(--ink) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.12em !important;
+  font-size: 0.82rem !important;
+  box-shadow: 0 2px 4px rgba(26, 20, 16, 0.12) !important;
+}
+.stButton button:hover {
+  background: var(--blood) !important;
+  color: var(--paper) !important;
+  border-color: var(--blood) !important;
+  box-shadow: 0 4px 8px rgba(26, 20, 16, 0.25) !important;
+}
+
+/* Expander */
+/* Expander */
+[data-testid="stExpander"] {
+    background: var(--paper-deep) !important;
+    border: 1px solid var(--paper-edge) !important;
+    border-radius: 0 !important;
+    box-shadow: 0 1px 0 rgba(255, 252, 240, 0.5) inset;
+}
+
+/* עיצוב הכותרת במצב רגיל - מבטיח קריאות כשלא מרחפים עליו */
+[data-testid="stExpander"] details>summary {
+    background-color: var(--paper-deep) !important;
+    /* רקע בהיר תואם למסמך */
+    color: var(--ink) !important;
+    /* טקסט שחור/דיו שיהיה תמיד ברור */
+    font-family: 'Courier New', monospace !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    font-size: 0.86rem !important;
+    transition: all 0.2s ease !important;
+    cursor: pointer;
+    padding: 10px !important;
+}
+
+/* מצב ריחוף (כשעוברים עם העכבר) */
+[data-testid="stExpander"] details>summary:hover {
+    color: var(--blood) !important;
+    /* הטקסט הופך לאדום דיו */
+    background-color: var(--paper) !important;
+    /* הרקע מתבהר טיפה */
+}
+
+/* חסינות לאייקונים: שומר על החצים תקינים */
+[data-testid="stExpander"] details>summary svg,
+[data-testid="stExpander"] details>summary [class*="icon"],
+[data-testid="stExpander"] details>summary .material-symbols-rounded,
+[data-testid="stExpander"] details>summary [data-testid="stIconMaterial"] {
+    font-family: "Material Symbols Rounded" !important;
+    text-transform: lowercase !important;
+    letter-spacing: normal !important;
+    color: inherit !important;
+}
+
+
+
+
+[data-testid="stExpander"] details > summary {
+  font-family: 'Courier New', monospace !important;
+  color: var(--paper-edge) !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  font-size: 0.86rem !important;
+  transition: color 0.2s ease !important;
+  cursor: pointer;
+}
+[data-testid="stExpander"] details > summary p {
+  font-family: 'Courier New', monospace !important;
+  color: inherit !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  font-size: 0.86rem !important;
+}
+[data-testid="stExpander"] details > summary:hover {
+  color: var(--ink) !important;
+}
+[data-testid="stExpander"] details > summary:hover * {
+  color: inherit !important;
+}
+
+/* Code */
+pre, code, .stCode, [data-testid="stCodeBlock"] {
+  font-family: 'Courier New', monospace !important;
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-radius: 0 !important;
+}
+
+/* Info / warning notification banners */
+[data-baseweb="notification"], [data-testid="stNotification"], .stAlert {
+  background: var(--paper) !important;
+  border: 1.5px solid var(--blood) !important;
+  border-left-width: 5px !important;
+  border-radius: 0 !important;
+  color: var(--ink) !important;
+  font-family: Georgia, serif !important;
+}
+[data-baseweb="notification"] *, [data-testid="stNotification"] * {
+  color: var(--ink) !important;
+  font-family: Georgia, serif !important;
+}
+
+/* Streamlit's main toolbar / deploy bar — dim it down */
+[data-testid="stHeader"] {
+  background: transparent !important;
+}
+[data-testid="stToolbar"] {
+  background: transparent !important;
+}
+
+/* JSON viewer */
+[data-testid="stJson"] {
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-radius: 0 !important;
+  color: var(--ink) !important;
+  font-family: 'Courier New', monospace !important;
+}
+
+/* Image-comparison slider — restyle handle to ink */
+.image-comparison-slider .__rcs-handle {
+  background: var(--ink) !important;
+}
+
+/* ========== ANIMATIONS — papers being placed ========== */
+@keyframes paperFade {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes stampIn {
+  from { opacity: 0; transform: rotate(-1.2deg) scale(1.08); }
+  to   { opacity: 1; transform: rotate(-1.2deg) scale(1); }
+}
+@keyframes inkFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.card { animation: paperFade 0.55s ease-out both; }
+.priority-card {
+  animation: paperFade 0.7s ease-out both;
+  animation-delay: 0.05s;
+}
+.priority-tag { animation: stampIn 0.45s ease-out 0.4s both; }
+.threat-card { animation: paperFade 0.5s ease-out both; }
+.threat-card:nth-of-type(1) { animation-delay: 0.1s; }
+.threat-card:nth-of-type(2) { animation-delay: 0.2s; }
+.threat-card:nth-of-type(3) { animation-delay: 0.3s; }
+.hero-title { animation: inkFade 0.8s ease-out both; }
+.hero-sub { animation: inkFade 0.8s ease-out 0.2s both; }
+
+/* Legend rows */
+.legend-row {
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin: 4px 0;
+  letter-spacing: 0.04em;
+}
+
+/* Ensure relative z-index for content above paper grain pseudo-elements */
+[data-testid="stAppViewContainer"] > .main { position: relative; z-index: 1; }
+.stApp > div { position: relative; z-index: 1; }
+
+
+/* הגנה על אייקונים של המערכת כדי שלא ידרסו על ידי הגופן המותאם אישית */
+.stApp .material-symbols-rounded,
+.stApp span[class*="material"],
+[data-testid="stExpander"] details>summary .material-symbols-rounded {
+    font-family: "Material Symbols Rounded" !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+}

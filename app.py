@@ -21,7 +21,6 @@ from pathlib import Path
 import altair as alt
 import pydeck as pdk
 import streamlit as st
-from streamlit_image_comparison import image_comparison
 
 DATA_PATH = "data/data.json"
 SCREENSHOT_DIR = "screenshots"
@@ -171,592 +170,20 @@ st.set_page_config(
     page_title="OSINT // DOSSIER ARCHIVE",
     page_icon="📜",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
+
+# Load external CSS
+with open("styles.css", "r", encoding="utf-8") as f:
+    css = f.read()
 
 st.markdown(
-    """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&display=swap');
-
-:root {
-  --paper:       #f4ecd8;
-  --paper-deep:  #ebe1c3;
-  --paper-edge:  #d4c8a4;
-  --ink:         #1a1410;
-  --ink-soft:    #3d342c;
-  --ash:         #6b6357;
-  --blood:       #8b1a1a;
-  --blood-soft:  #b54545;
-  --rust:        #a14a2c;
-  --brass:       #a07a2c;
-  --slate:       #2c3a4a;
-  --olive:       #4a5024;
-  --rule:        rgba(26, 20, 16, 0.18);
-}
-
-/* ========== BASE ========== */
-html, body, .stApp {
-  background:
-    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(139, 26, 26, 0.06) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(160, 122, 44, 0.05) 0%, transparent 60%),
-    repeating-linear-gradient(180deg, transparent 0, transparent 38px, rgba(26, 20, 16, 0.025) 38px, rgba(26, 20, 16, 0.025) 39px),
-    linear-gradient(180deg, var(--paper) 0%, var(--paper-deep) 100%) !important;
-  background-attachment: fixed !important;
-  color: var(--ink) !important;
-}
-/* Paper grain noise overlay across whole app */
-.stApp::before {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.10 0 0 0 0 0.08 0 0 0 0 0.06 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  opacity: 0.32;
-  mix-blend-mode: multiply;
-}
-/* Foxing — subtle aged-paper stains in corners */
-.stApp::after {
-  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  background:
-    radial-gradient(circle 200px at 8% 95%, rgba(160, 122, 44, 0.10), transparent 60%),
-    radial-gradient(circle 240px at 95% 4%, rgba(139, 26, 26, 0.06), transparent 60%);
-}
-
-/* All Streamlit body text → ink on paper */
-.stApp, .stApp p, .stApp li, .stApp span, .stApp div,
-.stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span,
-[data-testid="stText"], [data-testid="stMarkdownContainer"] p {
-  color: var(--ink);
-  font-family: Georgia, 'Garamond', Georgia, serif;
-}
-.stMarkdown p { font-size: 1.05rem; line-height: 1.55; }
-
-/* Streamlit headings */
-.stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4,
-.stMarkdown h5, .stMarkdown h6, h1, h2, h3 {
-  font-family: Georgia, serif;
-  color: var(--ink) !important;
-  font-weight: 700 !important;
-  letter-spacing: -0.005em;
-}
-
-/* ========== HEADER MASTHEAD ========== */
-.hero-title {
-  font-family: Georgia, serif;
-  font-weight: 900;
-  font-size: 4rem;
-  letter-spacing: -0.015em;
-  line-height: 0.95;
-  color: var(--ink);
-  text-transform: none;
-  border: none;
-  padding: 0;
-  margin: 0 0 6px 0;
-  position: relative;
-}
-.hero-title::before {
-  content: 'TOP SECRET // HUMINT // NOFORN';
-  display: block;
-  font-family: 'Courier New', monospace;
-  font-size: 0.74rem;
-  letter-spacing: 0.22em;
-  color: var(--blood);
-  margin-bottom: 18px;
-  padding: 5px 12px;
-  border-top: 2px solid var(--blood);
-  border-bottom: 2px solid var(--blood);
-  width: fit-content;
-}
-.hero-title::after {
-  content: '';
-  display: block;
-  margin-top: 10px;
-  height: 4px;
-  background: linear-gradient(180deg, var(--ink) 0 1px, transparent 1px 3px, var(--ink) 3px 4px);
-}
-.hero-sub {
-  font-family: 'Courier New', monospace;
-  color: var(--ink-soft);
-  font-size: 0.84rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  margin-bottom: 28px;
-}
-
-/* ========== CARDS — folded paper memos ========== */
-.card {
-  background: var(--paper-deep);
-  border: 1px solid var(--paper-edge);
-  border-left: 4px double var(--blood);
-  border-radius: 0;
-  padding: 26px 32px 24px 32px;
-  margin: 14px 0 26px 0;
-  position: relative;
-  box-shadow:
-    0 1px 0 rgba(255, 252, 240, 0.6) inset,
-    0 8px 28px -18px rgba(26, 20, 16, 0.45),
-    0 2px 4px -2px rgba(26, 20, 16, 0.18);
-}
-.card::before, .card::after {
-  content: ''; position: absolute;
-  width: 16px; height: 16px;
-  border: 1px solid var(--ink); opacity: 0.5;
-}
-.card::before { top: 7px; left: 7px; border-right: 0; border-bottom: 0; }
-.card::after  { bottom: 7px; right: 7px; border-left: 0; border-top: 0; }
-
-/* ========== CLICKABLE CARDS ========== */
-.clickable-card {
-  transition: all 0.2s ease;
-  display: block;
-}
-.clickable-card:hover .card {
-  transform: translateY(-4px);
-  box-shadow:
-    0 1px 0 rgba(255, 252, 240, 0.6) inset,
-    0 16px 36px -14px rgba(26, 20, 16, 0.55),
-    0 2px 4px -2px rgba(26, 20, 16, 0.18) !important;
-  border-left-color: var(--blood-soft);
-}
-
-/* ========== SECTION DIVIDERS ========== */
-.section-title {
-  font-family: Georgia, serif;
-  font-weight: 700;
-  font-size: 1.55rem;
-  color: var(--ink);
-  letter-spacing: 0.005em;
-  margin: 40px 0 14px 0;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--ink);
-  text-transform: none;
-  position: relative;
-}
-.section-title::after {
-  content: ''; display: block;
-  height: 1px; background: var(--ink);
-  margin-top: 3px;
-}
-
-/* ========== HEAD CONTENT ========== */
-.classification {
-  font-family: Georgia, serif;
-  font-weight: 900;
-  font-size: 2.4rem;
-  letter-spacing: -0.005em;
-  line-height: 1.05;
-  color: var(--ink);
-  text-transform: uppercase;
-}
-.exec-summary {
-  font-family: Georgia, serif;
-  font-style: italic;
-  font-size: 1.18rem;
-  line-height: 1.55;
-  color: var(--ink);
-  border-left: 3px double var(--blood);
-  padding: 4px 0 4px 18px;
-  margin-top: 16px;
-  background: transparent;
-  border-radius: 0;
-}
-.kv {
-  font-family: 'Courier New', monospace;
-  color: var(--ink-soft);
-  font-size: 0.84rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.kv b { color: var(--blood); font-weight: 400; }
-
-/* ========== THREAT BLOCK — pull quote with drop quote ========== */
-.threat-block {
-  font-family: Georgia, serif;
-  font-style: italic;
-  font-size: 1.08rem;
-  line-height: 1.6;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--paper-edge);
-  border-left: 3px double var(--blood);
-  padding: 16px 22px 14px 26px;
-  margin: 8px 0;
-  border-radius: 0;
-  position: relative;
-}
-.threat-block::before {
-  content: '\\201C';
-  position: absolute;
-  font-family: Georgia, serif;
-  font-size: 4.5rem;
-  color: var(--blood);
-  opacity: 0.18;
-  top: -14px; left: 8px;
-  line-height: 1;
-}
-
-/* ========== FINDINGS — Roman numeral list ========== */
-.finding-row {
-  display: flex; gap: 16px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--rule);
-  align-items: baseline;
-}
-.finding-num {
-  font-family: Georgia, serif;
-  color: var(--blood);
-  font-weight: 700;
-  min-width: 38px;
-  font-size: 1.1rem;
-  letter-spacing: 0.04em;
-}
-.finding-text {
-  color: var(--ink); flex: 1;
-  font-family: Georgia, serif;
-  font-size: 1.04rem;
-  line-height: 1.5;
-}
-
-.muted {
-  color: var(--ash);
-  font-family: Georgia, serif;
-  font-size: 0.96rem;
-  font-style: italic;
-}
-
-.placeholder-img {
-  border: 1px dashed var(--paper-edge);
-  background: var(--paper);
-  padding: 60px 20px;
-  text-align: center;
-  color: var(--ash);
-  font-family: 'Courier New', monospace;
-  font-size: 0.85rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-/* ========== PRIORITY TARGET — RED STAMP ENVELOPE ========== */
-.priority-card {
-  background:
-    linear-gradient(135deg, rgba(139, 26, 26, 0.05) 0%, transparent 50%),
-    var(--paper-deep);
-  border: 2px solid var(--blood);
-  border-radius: 0;
-  padding: 30px 36px 26px 36px;
-  margin: 16px 0 30px 0;
-  position: relative;
-  box-shadow:
-    0 0 0 6px var(--paper),
-    0 0 0 7px var(--blood),
-    0 14px 36px -18px rgba(26, 20, 16, 0.5);
-}
-.priority-card::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.10 0 0 0 0 0.10 0 0 0 0.5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  opacity: 0.06;
-  mix-blend-mode: multiply;
-}
-.priority-tag {
-  display: inline-block;
-  font-family: 'Courier New', monospace;
-  font-size: 0.78rem;
-  letter-spacing: 0.2em;
-  color: var(--blood);
-  background: var(--paper);
-  border: 2px solid var(--blood);
-  padding: 5px 14px 4px 14px;
-  border-radius: 0;
-  text-transform: uppercase;
-  margin-bottom: 14px;
-  position: relative;
-  transform: rotate(-1.2deg);
-  box-shadow:
-    0 0 0 1px var(--paper),
-    0 1px 0 var(--paper-edge);
-}
-
-/* ========== THREAT CARD — desk memo ========== */
-.threat-card {
-  background: var(--paper-deep);
-  border: 1px solid var(--paper-edge);
-  border-top: 3px double var(--blood);
-  border-radius: 0;
-  padding: 18px 22px;
-  margin: 6px 0;
-  height: 100%;
-  position: relative;
-}
-.rank-badge {
-  display: inline-block;
-  font-family: 'Courier New', monospace;
-  font-size: 0.78rem;
-  font-weight: 400;
-  color: var(--blood);
-  background: var(--paper);
-  border: 1px solid var(--blood);
-  padding: 2px 10px;
-  border-radius: 0;
-  margin-right: 8px;
-}
-.score-badge {
-  display: inline-block;
-  font-family: 'Courier New', monospace;
-  font-size: 0.78rem;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--ink);
-  border-bottom-width: 3px;
-  padding: 2px 10px;
-  border-radius: 0;
-  margin-left: 6px;
-}
-
-/* ========== SIDEBAR — dossier index ========== */
-section[data-testid="stSidebar"] {
-  background:
-    repeating-linear-gradient(0deg, transparent 0, transparent 36px, rgba(26, 20, 16, 0.03) 36px, rgba(26, 20, 16, 0.03) 37px),
-    var(--paper-deep) !important;
-  border-right: 1px solid var(--paper-edge) !important;
-}
-section[data-testid="stSidebar"] * {
-  color: var(--ink) !important;
-}
-section[data-testid="stSidebar"] h1,
-section[data-testid="stSidebar"] h2,
-section[data-testid="stSidebar"] h3 {
-  font-family: Georgia, serif;
-  color: var(--ink) !important;
-}
-
-/* ========== METRICS — stamped paper card ========== */
-[data-testid="stMetric"] {
-  background: var(--paper);
-  border: 1px solid var(--paper-edge);
-  border-left: 3px solid var(--blood);
-  border-radius: 0;
-  padding: 12px 16px;
-  position: relative;
-}
-[data-testid="stMetricValue"] {
-  font-family: Georgia, serif;
-  font-weight: 900 !important;
-  color: var(--ink) !important;
-  font-size: 2.2rem !important;
-  line-height: 1 !important;
-}
-[data-testid="stMetricLabel"] p,
-[data-testid="stMetricLabel"] {
-  font-family: 'Courier New', monospace !important;
-  color: var(--ink-soft) !important;
-  font-size: 0.74rem !important;
-  letter-spacing: 0.14em !important;
-  text-transform: uppercase !important;
-}
-
-/* ========== TABS — file tabs on a folder ========== */
-.stTabs [data-baseweb="tab-list"] {
-  border-bottom: 1px solid var(--ink);
-  gap: 0 !important;
-}
-.stTabs [data-baseweb="tab"] {
-  font-family: 'Courier New', monospace !important;
-  font-size: 0.85rem !important;
-  letter-spacing: 0.1em !important;
-  color: var(--ink-soft) !important;
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  border-bottom: none !important;
-  padding: 6px 14px !important;
-  text-transform: uppercase;
-}
-.stTabs [data-baseweb="tab"]:hover {
-  color: var(--blood) !important;
-  background: rgba(139, 26, 26, 0.04) !important;
-}
-.stTabs [data-baseweb="tab"][aria-selected="true"] {
-  color: var(--blood) !important;
-  background: var(--paper) !important;
-  border: 1px solid var(--ink) !important;
-  border-bottom: 1px solid var(--paper) !important;
-  position: relative;
-  top: 1px;
-}
-.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
-.stTabs [data-baseweb="tab-border"] { display: none !important; }
-
-/* ========== INPUTS ========== */
-.stTextInput input,
-.stTextInput input[type="text"] {
-  background: var(--paper) !important;
-  border: 1px solid var(--paper-edge) !important;
-  border-bottom: 2px solid var(--ink) !important;
-  border-radius: 0 !important;
-  font-family: 'Courier New', monospace !important;
-  color: var(--ink) !important;
-  font-size: 0.92rem !important;
-}
-.stTextInput input::placeholder {
-  color: var(--ash) !important;
-  font-style: italic;
-}
-
-[data-baseweb="select"] > div {
-  background: var(--paper) !important;
-  border: 1px solid var(--paper-edge) !important;
-  border-bottom: 2px solid var(--ink) !important;
-  border-radius: 0 !important;
-  font-family: Georgia, serif !important;
-  color: var(--ink) !important;
-}
-[data-baseweb="select"] [role="listbox"] { background: var(--paper) !important; }
-[data-baseweb="select"] [role="option"] {
-  font-family: Georgia, serif !important;
-  color: var(--ink) !important;
-}
-[data-baseweb="select"] [role="option"]:hover {
-  background: rgba(139, 26, 26, 0.08) !important;
-}
-
-/* Toggle / checkbox text */
-[data-testid="stCheckbox"] label, [data-testid="stToggle"] label,
-[data-testid="stCheckbox"] *, [data-testid="stToggle"] * {
-  color: var(--ink) !important;
-  font-family: 'Courier New', monospace !important;
-  font-size: 0.84rem !important;
-  letter-spacing: 0.05em;
-}
-
-/* Captions — typewriter footnotes */
-[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {
-  color: var(--ink-soft) !important;
-  font-family: 'Courier New', monospace !important;
-  font-size: 0.76rem !important;
-  letter-spacing: 0.1em !important;
-  text-transform: uppercase;
-}
-
-/* Buttons — file-stamped - always visible */
-.stButton button, button[kind="secondary"], button[kind="primary"] {
-  background: var(--paper) !important;
-  border: 2px solid var(--ink) !important;
-  border-bottom-width: 3px !important;
-  border-radius: 0 !important;
-  font-family: 'Courier New', monospace !important;
-  color: var(--ink) !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.12em !important;
-  font-size: 0.82rem !important;
-  box-shadow: 0 2px 4px rgba(26, 20, 16, 0.12) !important;
-}
-.stButton button:hover {
-  background: var(--blood) !important;
-  color: var(--paper) !important;
-  border-color: var(--blood) !important;
-  box-shadow: 0 4px 8px rgba(26, 20, 16, 0.25) !important;
-}
-
-/* Expander */
-[data-testid="stExpander"] {
-  background: var(--paper-deep) !important;
-  border: 1px solid var(--paper-edge) !important;
-  border-radius: 0 !important;
-  box-shadow: 0 1px 0 rgba(255, 252, 240, 0.5) inset;
-}
-[data-testid="stExpander"] summary,
-[data-testid="stExpander"] summary * {
-  font-family: 'Courier New', monospace !important;
-  color: var(--ink) !important;
-  letter-spacing: 0.06em !important;
-  text-transform: uppercase !important;
-  font-size: 0.86rem !important;
-}
-
-/* Code */
-pre, code, .stCode, [data-testid="stCodeBlock"] {
-  font-family: 'Courier New', monospace !important;
-  background: var(--paper) !important;
-  color: var(--ink) !important;
-  border: 1px solid var(--paper-edge) !important;
-  border-radius: 0 !important;
-}
-
-/* Info / warning notification banners */
-[data-baseweb="notification"], [data-testid="stNotification"], .stAlert {
-  background: var(--paper) !important;
-  border: 1.5px solid var(--blood) !important;
-  border-left-width: 5px !important;
-  border-radius: 0 !important;
-  color: var(--ink) !important;
-  font-family: Georgia, serif !important;
-}
-[data-baseweb="notification"] *, [data-testid="stNotification"] * {
-  color: var(--ink) !important;
-  font-family: Georgia, serif !important;
-}
-
-/* Streamlit's main toolbar / deploy bar — dim it down */
-[data-testid="stHeader"] {
-  background: transparent !important;
-}
-[data-testid="stToolbar"] {
-  background: transparent !important;
-}
-
-/* JSON viewer */
-[data-testid="stJson"] {
-  background: var(--paper) !important;
-  border: 1px solid var(--paper-edge) !important;
-  border-radius: 0 !important;
-  color: var(--ink) !important;
-  font-family: 'Courier New', monospace !important;
-}
-
-/* Image-comparison slider — restyle handle to ink */
-.image-comparison-slider .__rcs-handle {
-  background: var(--ink) !important;
-}
-
-/* ========== ANIMATIONS — papers being placed ========== */
-@keyframes paperFade {
-  from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes stampIn {
-  from { opacity: 0; transform: rotate(-1.2deg) scale(1.08); }
-  to   { opacity: 1; transform: rotate(-1.2deg) scale(1); }
-}
-@keyframes inkFade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.card { animation: paperFade 0.55s ease-out both; }
-.priority-card {
-  animation: paperFade 0.7s ease-out both;
-  animation-delay: 0.05s;
-}
-.priority-tag { animation: stampIn 0.45s ease-out 0.4s both; }
-.threat-card { animation: paperFade 0.5s ease-out both; }
-.threat-card:nth-of-type(1) { animation-delay: 0.1s; }
-.threat-card:nth-of-type(2) { animation-delay: 0.2s; }
-.threat-card:nth-of-type(3) { animation-delay: 0.3s; }
-.hero-title { animation: inkFade 0.8s ease-out both; }
-.hero-sub { animation: inkFade 0.8s ease-out 0.2s both; }
-
-/* Legend rows */
-.legend-row {
-  font-family: 'Courier New', monospace;
-  font-size: 0.78rem;
-  color: var(--ink-soft);
-  margin: 4px 0;
-  letter-spacing: 0.04em;
-}
-
-/* Ensure relative z-index for content above paper grain pseudo-elements */
-[data-testid="stAppViewContainer"] > .main { position: relative; z-index: 1; }
-.stApp > div { position: relative; z-index: 1; }
-</style>
-""",
+    f"<style>{css}</style>",
     unsafe_allow_html=True,
 )
+
+
+# ---------- load data ----------
 
 
 # ---------- load data ----------
@@ -794,67 +221,93 @@ m4.metric(
 )
 
 
-# ---------- sidebar filters ----------
+# ---------- top filter bar ----------
 
-with st.sidebar:
-    st.markdown("### 🎯 Filters")
+if "search_query_value" not in st.session_state:
+    st.session_state.search_query_value = ""
+if "country_choice_value" not in st.session_state:
+    st.session_state.country_choice_value = "All countries"
 
+# Pre-compute filter scope using current session-state values, so the count chip
+# above the inputs reflects what the inputs will produce on this run.
+_pending_query = st.session_state.search_query_value
+_pending_country = st.session_state.country_choice_value
+_pending_matching = (
+    [b for b in data if base_matches(b, _pending_query)]
+    if _pending_query.strip()
+    else data
+)
+_pending_in_scope = (
+    _pending_matching
+    if _pending_country == "All countries"
+    else [b for b in _pending_matching if b["country"] == _pending_country]
+)
+_pending_filters_active = bool(_pending_query.strip()) or _pending_country != "All countries"
+
+_count_class = "filter-bar-count is-filtered" if _pending_filters_active else "filter-bar-count"
+_count_label = (
+    f"{len(_pending_in_scope)} OF {len(data)} BASES"
+    if _pending_filters_active
+    else f"{len(data)} BASES"
+)
+st.markdown(
+    f'<div class="filter-bar-header">'
+    f'<span class="filter-bar-title">Dossier Archive · Filter</span>'
+    f'<span class="{_count_class}">{_count_label}</span>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
+
+fc1, fc2, fc3 = st.columns([3, 1, 0.6])
+with fc1:
     search_query = st.text_input(
         "🔍 Search",
-        placeholder="missile, hangar, naval...",
+        placeholder="🔍  Search objects: missile, hangar, naval, runway...",
+        label_visibility="collapsed",
+        key="search_query_value",
         help="Free-text match against findings, analysis, classifications, and detection labels.",
     )
-
-    # Filter bases by query first, so country/base dropdowns only offer matching options.
+with fc2:
     matching_data = [b for b in data if base_matches(b, search_query)] if search_query.strip() else data
-
     available_countries = sorted({b["country"] for b in matching_data})
     country_options = ["All countries"] + available_countries
-    country_choice = st.selectbox("Country", country_options, index=0)
+    if st.session_state.country_choice_value not in country_options:
+        st.session_state.country_choice_value = "All countries"
+    country_choice = st.selectbox(
+        "Country",
+        country_options,
+        label_visibility="collapsed",
+        key="country_choice_value",
+    )
 
-    if not matching_data:
-        bases_in_scope = []
-        selected_base = None
-    elif country_choice == "All countries":
-        bases_in_scope = matching_data
-        selected_base = None
-    else:
-        bases_in_scope = [b for b in matching_data if b["country"] == country_choice]
-        base_labels = [
-            f"#{b['base_id']} — {b['commander_report']['facility_classification']} "
-            f"({b['commander_report']['confidence']})"
-            for b in bases_in_scope
-        ]
-        idx = st.selectbox(
-            "Base",
-            range(len(bases_in_scope)),
-            format_func=lambda i: base_labels[i],
+if not matching_data:
+    bases_in_scope = []
+elif country_choice == "All countries":
+    bases_in_scope = matching_data
+else:
+    bases_in_scope = [b for b in matching_data if b["country"] == country_choice]
+
+filters_active = bool(search_query.strip()) or country_choice != "All countries"
+
+def _clear_filters():
+    st.session_state.search_query_value = ""
+    st.session_state.country_choice_value = "All countries"
+
+with fc3:
+    if filters_active:
+        st.button(
+            "Clear",
+            key="clear_filters",
+            on_click=_clear_filters,
+            use_container_width=True,
         )
-        selected_base = bases_in_scope[idx]
-    
-    # Override with session state if a base was clicked from the overview
-    if st.session_state.selected_base_id is not None:
-        for b in data:
-            if b['base_id'] == st.session_state.selected_base_id:
-                selected_base = b
-                break
 
-    st.markdown("---")
-    st.markdown("### Legend")
-    st.markdown(
-        f'<div class="legend-row">CONFIDENCE: '
-        f'{confidence_pill("high")}{confidence_pill("medium")}{confidence_pill("low")}</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        f'<div class="legend-row">ACTIONS: '
-        f'{action_pill("zoom-in")}{action_pill("zoom-out")}'
-        f'{action_pill("move-left")}{action_pill("finish")}</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("---")
-    show_raw_json = st.toggle("Show raw JSON")
+selected_base = None
+if st.session_state.selected_base_id is not None:
+    for b in data:
+        if b["base_id"] == st.session_state.selected_base_id:
+            selected_base = b
+            break
 
 
 # ---------- overview mode ----------
@@ -953,23 +406,30 @@ def render_overview(bases: list, query: str = ""):
     st.markdown('<div style="margin-top: 32px; margin-bottom: 16px; border-top: 1px solid var(--paper-edge); padding-top: 24px;"></div>', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Global Distribution</div>', unsafe_allow_html=True)
 
-    # Map of all bases
+    # Threat-weighted global map: radius and red-intensity scale with threat_score.
     if bases:
-        map_points = [
-            {
+        scores = [threat_score(b) for b in bases]
+        max_score = max(scores) or 1
+
+        map_points = []
+        for b in bases:
+            score = threat_score(b)
+            ratio = score / max_score
+            map_points.append({
                 "lat": float(b["initial_latitude"]),
                 "lon": float(b["initial_longitude"]),
                 "name": f"{b['country']} #{b['base_id']}",
                 "classification": b["commander_report"]["facility_classification"],
                 "confidence": b["commander_report"]["confidence"],
+                "score": score,
+                "radius": 60000 + int(ratio * 240000),
                 "color": [
-                    int(CONFIDENCE_COLORS.get(b["commander_report"]["confidence"], "#64748b")[1:3], 16),
-                    int(CONFIDENCE_COLORS.get(b["commander_report"]["confidence"], "#64748b")[3:5], 16),
-                    int(CONFIDENCE_COLORS.get(b["commander_report"]["confidence"], "#64748b")[5:7], 16),
+                    int(200 + (139 - 200) * ratio),
+                    int(180 + (26 - 180) * ratio),
+                    int(130 + (26 - 130) * ratio),
+                    int(140 + ratio * 115),
                 ],
-            }
-            for b in bases
-        ]
+            })
 
         view = pdk.ViewState(
             latitude=sum(p["lat"] for p in map_points) / len(map_points),
@@ -982,22 +442,31 @@ def render_overview(bases: list, query: str = ""):
             data=map_points,
             get_position=["lon", "lat"],
             get_color="color",
-            get_radius=120000,
-            radius_min_pixels=8,
-            radius_max_pixels=30,
+            get_radius="radius",
+            radius_min_pixels=6,
+            radius_max_pixels=42,
             pickable=True,
             opacity=0.85,
+            stroked=True,
+            get_line_color=[26, 20, 16, 180],
+            line_width_min_pixels=1,
         )
         deck = pdk.Deck(
             layers=[layer],
             initial_view_state=view,
             map_style="light",
             tooltip={
-                "html": "<b>{name}</b><br/>{classification}<br/><i>confidence: {confidence}</i>",
+                "html": "<b>{name}</b><br/>{classification}<br/>"
+                        "<i>confidence: {confidence}</i><br/>"
+                        "<b style='color:#8b1a1a;'>threat score: {score}</b>",
                 "style": {"backgroundColor": "#f4ecd8", "color": "#1a1410", "fontFamily": "EB Garamond, serif", "border": "1px solid #1a1410"},
             },
         )
         st.pydeck_chart(deck, use_container_width=True)
+        st.caption(
+            f"Dot size + redness ∝ threat score (confidence × findings). "
+            f"Range: {min(scores)}–{max(scores)} across {len(bases)} base(s)."
+        )
 
     # Country-grouped cards
     by_country = {}
@@ -1018,6 +487,7 @@ def render_overview(bases: list, query: str = ""):
                 card_html = f"""
 <div class="clickable-card" style="cursor:pointer;" data-base-id="{b['base_id']}">
   <div class="card">
+    <span class="card-corner-mark"></span>
     <div class="kv"><b>BASE #{b['base_id']}</b></div>
     <div class="classification" style="margin:8px 0 6px 0;">{hl(cmd['facility_classification'], query)}</div>
     {confidence_pill(cmd['confidence'])}
@@ -1295,13 +765,11 @@ def render_analyst(a: dict, query: str = ""):
         unsafe_allow_html=True,
     )
 
-    # Image: comparison slider when both raw + annotated exist; single image otherwise.
     if raw and annotated:
         st.caption(
-            f"Drag the divider · left = satellite frame · right = Moondream annotated "
+            f"Left = raw satellite frame · right = Moondream annotated "
             f"({len(a['moondream_detections'])} object(s))"
         )
-        # Display images side-by-side in full width
         col1, col2 = st.columns(2)
         with col1:
             st.image(raw, caption="Raw satellite frame", use_container_width=True)
@@ -1368,12 +836,3 @@ elif selected_base is None:
 else:
     render_base_detail(selected_base, q)
 
-
-# ---------- raw JSON ----------
-
-if show_raw_json:
-    st.markdown('<div class="section-title">Raw JSON</div>', unsafe_allow_html=True)
-    if selected_base is None:
-        st.json(bases_in_scope)
-    else:
-        st.json(selected_base)

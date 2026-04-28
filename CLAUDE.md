@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+General engineering rules (fail-fast, no silent fallbacks, code structure) live in [AGENTS.md](AGENTS.md). Read it before editing.
+
 ## Project
 
 OSINT / GEOINT analyzer for military bases. HW2, assignment2-exercise2 of the "From idea to app using AI" course.
@@ -44,3 +46,8 @@ Requires a valid `GEMINI_API_KEY` in [.env](.env) (see [.env.example](.env.examp
 - **Raw PNG is deleted** after JPEG conversion at [base_analyzer.py:207](base_analyzer.py#L207) — intentional, saves disk.
 - **.env is gitignored**; do not commit the key.
 - The script uses the legacy `google-generativeai` SDK (import as `genai`). A newer unified SDK (`google-genai`) exists but migration is out of scope for this assignment.
+
+## next step to do:
+In general - fix UI design.
+Keyboard_double_arrow_right 
+facilities
