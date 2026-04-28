@@ -634,10 +634,10 @@ section[data-testid="stSidebar"] h3 {
   text-transform: uppercase;
 }
 
-/* Buttons — file-stamped */
+/* Buttons — file-stamped - always visible */
 .stButton button, button[kind="secondary"], button[kind="primary"] {
   background: var(--paper) !important;
-  border: 1px solid var(--ink) !important;
+  border: 2px solid var(--ink) !important;
   border-bottom-width: 3px !important;
   border-radius: 0 !important;
   font-family: 'Courier New', monospace !important;
@@ -645,11 +645,13 @@ section[data-testid="stSidebar"] h3 {
   text-transform: uppercase !important;
   letter-spacing: 0.12em !important;
   font-size: 0.82rem !important;
+  box-shadow: 0 2px 4px rgba(26, 20, 16, 0.12) !important;
 }
 .stButton button:hover {
   background: var(--blood) !important;
   color: var(--paper) !important;
   border-color: var(--blood) !important;
+  box-shadow: 0 4px 8px rgba(26, 20, 16, 0.25) !important;
 }
 
 /* Expander */
