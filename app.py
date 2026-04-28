@@ -26,13 +26,13 @@ from streamlit_image_comparison import image_comparison
 DATA_PATH = "data/data.json"
 SCREENSHOT_DIR = "screenshots"
 
-CONFIDENCE_COLORS = {"high": "#22c55e", "medium": "#f59e0b", "low": "#ef4444"}
+CONFIDENCE_COLORS = {"high": "#8b1a1a", "medium": "#a07a2c", "low": "#6b6357"}
 ACTION_COLORS = {
-    "zoom-in": "#22c55e",
-    "zoom-out": "#3b82f6",
-    "move-left": "#f59e0b",
-    "move-right": "#f59e0b",
-    "finish": "#64748b",
+    "zoom-in": "#8b1a1a",
+    "zoom-out": "#2c3a4a",
+    "move-left": "#a07a2c",
+    "move-right": "#a07a2c",
+    "finish": "#3d342c",
 }
 COUNTRY_FLAGS = {
     "Egypt": "🇪🇬", "Korea": "🇰🇷", "Russia": "🇷🇺", "China": "🇨🇳",
@@ -54,12 +54,13 @@ def load_data(mtime: float):
 # ---------- HTML helpers ----------
 
 def pill(text: str, color: str, *, mono: bool = True) -> str:
-    font = "ui-monospace, SFMono-Regular, monospace" if mono else "inherit"
+    """Rendered as a rubber-stamp rectangle — declassified-document aesthetic."""
+    font = "'Special Elite', monospace" if mono else "'EB Garamond', serif"
     return (
-        f'<span style="display:inline-block;padding:3px 10px;border-radius:999px;'
-        f'background:{color}22;color:{color};border:1px solid {color}66;'
-        f'font-family:{font};font-size:0.78rem;font-weight:600;'
-        f'letter-spacing:0.04em;text-transform:uppercase;margin:2px 4px 2px 0;">'
+        f'<span style="display:inline-block;padding:3px 10px;border-radius:0;'
+        f'background:transparent;color:{color};border:1.5px solid {color};'
+        f'font-family:{font};font-size:0.8rem;font-weight:400;'
+        f'letter-spacing:0.16em;text-transform:uppercase;margin:2px 4px 2px 0;">'
         f"{text}</span>"
     )
 
@@ -167,8 +168,8 @@ if "selected_base_id" not in st.session_state:
 
 
 st.set_page_config(
-    page_title="OSINT GEOINT Analyzer",
-    page_icon="🛰️",
+    page_title="OSINT // DOSSIER ARCHIVE",
+    page_icon="📜",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -176,141 +177,580 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Georgia:wght@400;700&display=swap');
+
 :root {
-  --bg: #0b1220;
-  --panel: #111a2e;
-  --panel-2: #15203a;
-  --accent: #f59e0b;
-  --text: #e5e7eb;
-  --muted: #94a3b8;
-  --border: #1f2a44;
+  --paper:       #f4ecd8;
+  --paper-deep:  #ebe1c3;
+  --paper-edge:  #d4c8a4;
+  --ink:         #1a1410;
+  --ink-soft:    #3d342c;
+  --ash:         #6b6357;
+  --blood:       #8b1a1a;
+  --blood-soft:  #b54545;
+  --rust:        #a14a2c;
+  --brass:       #a07a2c;
+  --slate:       #2c3a4a;
+  --olive:       #4a5024;
+  --rule:        rgba(26, 20, 16, 0.18);
 }
-.stApp { background: linear-gradient(180deg, #0b1220 0%, #0e162a 100%); }
+
+/* ========== BASE ========== */
+html, body, .stApp {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(139, 26, 26, 0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, rgba(160, 122, 44, 0.05) 0%, transparent 60%),
+    repeating-linear-gradient(180deg, transparent 0, transparent 38px, rgba(26, 20, 16, 0.025) 38px, rgba(26, 20, 16, 0.025) 39px),
+    linear-gradient(180deg, var(--paper) 0%, var(--paper-deep) 100%) !important;
+  background-attachment: fixed !important;
+  color: var(--ink) !important;
+}
+/* Paper grain noise overlay across whole app */
+.stApp::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.10 0 0 0 0 0.08 0 0 0 0 0.06 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.32;
+  mix-blend-mode: multiply;
+}
+/* Foxing — subtle aged-paper stains in corners */
+.stApp::after {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(circle 200px at 8% 95%, rgba(160, 122, 44, 0.10), transparent 60%),
+    radial-gradient(circle 240px at 95% 4%, rgba(139, 26, 26, 0.06), transparent 60%);
+}
+
+/* All Streamlit body text → ink on paper */
+.stApp, .stApp p, .stApp li, .stApp span, .stApp div,
+.stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span,
+[data-testid="stText"], [data-testid="stMarkdownContainer"] p {
+  color: var(--ink);
+  font-family: Georgia, 'Garamond', Georgia, serif;
+}
+.stMarkdown p { font-size: 1.05rem; line-height: 1.55; }
+
+/* Streamlit headings */
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4,
+.stMarkdown h5, .stMarkdown h6, h1, h2, h3 {
+  font-family: Georgia, serif;
+  color: var(--ink) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.005em;
+}
+
+/* ========== HEADER MASTHEAD ========== */
 .hero-title {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 2.1rem; font-weight: 700; letter-spacing: 0.18em;
-  color: var(--text);
-  border-bottom: 2px solid var(--accent);
-  padding-bottom: 6px; margin-bottom: 4px;
+  font-family: Georgia, serif;
+  font-weight: 900;
+  font-size: 4rem;
+  letter-spacing: -0.015em;
+  line-height: 0.95;
+  color: var(--ink);
+  text-transform: none;
+  border: none;
+  padding: 0;
+  margin: 0 0 6px 0;
+  position: relative;
+}
+.hero-title::before {
+  content: 'TOP SECRET // HUMINT // NOFORN';
+  display: block;
+  font-family: 'Courier New', monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.22em;
+  color: var(--blood);
+  margin-bottom: 18px;
+  padding: 5px 12px;
+  border-top: 2px solid var(--blood);
+  border-bottom: 2px solid var(--blood);
+  width: fit-content;
+}
+.hero-title::after {
+  content: '';
+  display: block;
+  margin-top: 10px;
+  height: 4px;
+  background: linear-gradient(180deg, var(--ink) 0 1px, transparent 1px 3px, var(--ink) 3px 4px);
 }
 .hero-sub {
-  font-family: ui-monospace, monospace; color: var(--muted);
-  font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase;
-  margin-bottom: 18px;
+  font-family: 'Courier New', monospace;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 28px;
 }
+
+/* ========== CARDS — folded paper memos ========== */
 .card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 6px;
-  padding: 18px 22px;
-  margin: 10px 0 18px 0;
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-edge);
+  border-left: 4px double var(--blood);
+  border-radius: 0;
+  padding: 26px 32px 24px 32px;
+  margin: 14px 0 26px 0;
+  position: relative;
+  box-shadow:
+    0 1px 0 rgba(255, 252, 240, 0.6) inset,
+    0 8px 28px -18px rgba(26, 20, 16, 0.45),
+    0 2px 4px -2px rgba(26, 20, 16, 0.18);
 }
-.card h3, .card h4 { color: var(--text); margin-top: 0; }
+.card::before, .card::after {
+  content: ''; position: absolute;
+  width: 16px; height: 16px;
+  border: 1px solid var(--ink); opacity: 0.5;
+}
+.card::before { top: 7px; left: 7px; border-right: 0; border-bottom: 0; }
+.card::after  { bottom: 7px; right: 7px; border-left: 0; border-top: 0; }
+
+/* ========== CLICKABLE CARDS ========== */
+.clickable-card {
+  transition: all 0.2s ease;
+  display: block;
+}
+.clickable-card:hover .card {
+  transform: translateY(-4px);
+  box-shadow:
+    0 1px 0 rgba(255, 252, 240, 0.6) inset,
+    0 16px 36px -14px rgba(26, 20, 16, 0.55),
+    0 2px 4px -2px rgba(26, 20, 16, 0.18) !important;
+  border-left-color: var(--blood-soft);
+}
+
+/* ========== SECTION DIVIDERS ========== */
 .section-title {
-  font-family: ui-monospace, monospace;
-  font-size: 0.95rem; letter-spacing: 0.16em; text-transform: uppercase;
-  color: var(--accent); margin: 24px 0 8px 0;
-  border-bottom: 1px dashed var(--border); padding-bottom: 6px;
+  font-family: Georgia, serif;
+  font-weight: 700;
+  font-size: 1.55rem;
+  color: var(--ink);
+  letter-spacing: 0.005em;
+  margin: 40px 0 14px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ink);
+  text-transform: none;
+  position: relative;
 }
+.section-title::after {
+  content: ''; display: block;
+  height: 1px; background: var(--ink);
+  margin-top: 3px;
+}
+
+/* ========== HEAD CONTENT ========== */
 .classification {
-  font-family: ui-monospace, monospace;
-  font-size: 1.6rem; font-weight: 700; letter-spacing: 0.06em;
-  color: var(--text);
+  font-family: Georgia, serif;
+  font-weight: 900;
+  font-size: 2.4rem;
+  letter-spacing: -0.005em;
+  line-height: 1.05;
+  color: var(--ink);
+  text-transform: uppercase;
 }
 .exec-summary {
-  font-size: 1.02rem; line-height: 1.55; color: var(--text);
-  border-left: 3px solid var(--accent);
-  padding: 6px 14px; background: var(--panel-2); border-radius: 0 4px 4px 0;
-  margin-top: 10px;
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 1.18rem;
+  line-height: 1.55;
+  color: var(--ink);
+  border-left: 3px double var(--blood);
+  padding: 4px 0 4px 18px;
+  margin-top: 16px;
+  background: transparent;
+  border-radius: 0;
 }
-.kv { font-family: ui-monospace, monospace; color: var(--muted); font-size: 0.82rem; }
-.kv b { color: var(--text); }
+.kv {
+  font-family: 'Courier New', monospace;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.kv b { color: var(--blood); font-weight: 400; }
+
+/* ========== THREAT BLOCK — pull quote with drop quote ========== */
 .threat-block {
-  background: var(--panel-2); border: 1px solid var(--border);
-  border-left: 3px solid #ef4444;
-  padding: 12px 16px; border-radius: 4px; color: var(--text);
-  font-style: italic; line-height: 1.55;
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: 1.08rem;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  border-left: 3px double var(--blood);
+  padding: 16px 22px 14px 26px;
+  margin: 8px 0;
+  border-radius: 0;
+  position: relative;
 }
+.threat-block::before {
+  content: '\\201C';
+  position: absolute;
+  font-family: Georgia, serif;
+  font-size: 4.5rem;
+  color: var(--blood);
+  opacity: 0.18;
+  top: -14px; left: 8px;
+  line-height: 1;
+}
+
+/* ========== FINDINGS — Roman numeral list ========== */
 .finding-row {
-  display: flex; gap: 10px; padding: 6px 0;
-  border-bottom: 1px dashed var(--border);
+  display: flex; gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule);
+  align-items: baseline;
 }
 .finding-num {
-  font-family: ui-monospace, monospace; color: var(--accent);
-  font-weight: 700; min-width: 32px;
+  font-family: Georgia, serif;
+  color: var(--blood);
+  font-weight: 700;
+  min-width: 38px;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
 }
-.finding-text { color: var(--text); flex: 1; }
-.muted { color: var(--muted); font-size: 0.85rem; }
-.placeholder-img {
-  border: 1px dashed var(--border); border-radius: 6px;
-  padding: 60px 20px; text-align: center; color: var(--muted);
-  font-family: ui-monospace, monospace;
+.finding-text {
+  color: var(--ink); flex: 1;
+  font-family: Georgia, serif;
+  font-size: 1.04rem;
+  line-height: 1.5;
 }
-section[data-testid="stSidebar"] {
-  background: #0a1020; border-right: 1px solid var(--border);
-}
-[data-testid="stMetric"] {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 6px; padding: 8px 12px;
-}
-.legend-row { font-family: ui-monospace, monospace; font-size: 0.78rem; color: var(--muted); margin: 4px 0; }
 
-/* Top threats leaderboard */
+.muted {
+  color: var(--ash);
+  font-family: Georgia, serif;
+  font-size: 0.96rem;
+  font-style: italic;
+}
+
+.placeholder-img {
+  border: 1px dashed var(--paper-edge);
+  background: var(--paper);
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--ash);
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ========== PRIORITY TARGET — RED STAMP ENVELOPE ========== */
 .priority-card {
-  background: linear-gradient(135deg, #1a0f1a 0%, #2a1015 100%);
-  border: 1px solid #ef4444;
-  border-left: 4px solid #ef4444;
-  border-radius: 8px;
-  padding: 22px 26px;
-  margin: 12px 0 22px 0;
-  box-shadow: 0 0 24px rgba(239, 68, 68, 0.15);
+  background:
+    linear-gradient(135deg, rgba(139, 26, 26, 0.05) 0%, transparent 50%),
+    var(--paper-deep);
+  border: 2px solid var(--blood);
+  border-radius: 0;
+  padding: 30px 36px 26px 36px;
+  margin: 16px 0 30px 0;
+  position: relative;
+  box-shadow:
+    0 0 0 6px var(--paper),
+    0 0 0 7px var(--blood),
+    0 14px 36px -18px rgba(26, 20, 16, 0.5);
+}
+.priority-card::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 0.55 0 0 0 0 0.10 0 0 0 0 0.10 0 0 0 0.5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.06;
+  mix-blend-mode: multiply;
 }
 .priority-tag {
   display: inline-block;
-  font-family: ui-monospace, monospace;
-  font-size: 0.72rem;
-  letter-spacing: 0.18em;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid #ef4444;
-  padding: 3px 10px;
-  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.2em;
+  color: var(--blood);
+  background: var(--paper);
+  border: 2px solid var(--blood);
+  padding: 5px 14px 4px 14px;
+  border-radius: 0;
   text-transform: uppercase;
-  margin-bottom: 8px;
+  margin-bottom: 14px;
+  position: relative;
+  transform: rotate(-1.2deg);
+  box-shadow:
+    0 0 0 1px var(--paper),
+    0 1px 0 var(--paper-edge);
 }
+
+/* ========== THREAT CARD — desk memo ========== */
 .threat-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-left: 3px solid #f59e0b;
-  border-radius: 6px;
-  padding: 14px 18px;
+  background: var(--paper-deep);
+  border: 1px solid var(--paper-edge);
+  border-top: 3px double var(--blood);
+  border-radius: 0;
+  padding: 18px 22px;
   margin: 6px 0;
   height: 100%;
+  position: relative;
 }
 .rank-badge {
   display: inline-block;
-  font-family: ui-monospace, monospace;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--accent);
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid var(--accent);
-  padding: 2px 8px;
-  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--blood);
+  background: var(--paper);
+  border: 1px solid var(--blood);
+  padding: 2px 10px;
+  border-radius: 0;
   margin-right: 8px;
 }
 .score-badge {
   display: inline-block;
-  font-family: ui-monospace, monospace;
-  font-size: 0.74rem;
-  color: var(--text);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  padding: 3px 10px;
-  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  border-bottom-width: 3px;
+  padding: 2px 10px;
+  border-radius: 0;
   margin-left: 6px;
 }
+
+/* ========== SIDEBAR — dossier index ========== */
+section[data-testid="stSidebar"] {
+  background:
+    repeating-linear-gradient(0deg, transparent 0, transparent 36px, rgba(26, 20, 16, 0.03) 36px, rgba(26, 20, 16, 0.03) 37px),
+    var(--paper-deep) !important;
+  border-right: 1px solid var(--paper-edge) !important;
+}
+section[data-testid="stSidebar"] * {
+  color: var(--ink) !important;
+}
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 {
+  font-family: Georgia, serif;
+  color: var(--ink) !important;
+}
+
+/* ========== METRICS — stamped paper card ========== */
+[data-testid="stMetric"] {
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  border-left: 3px solid var(--blood);
+  border-radius: 0;
+  padding: 12px 16px;
+  position: relative;
+}
+[data-testid="stMetricValue"] {
+  font-family: Georgia, serif;
+  font-weight: 900 !important;
+  color: var(--ink) !important;
+  font-size: 2.2rem !important;
+  line-height: 1 !important;
+}
+[data-testid="stMetricLabel"] p,
+[data-testid="stMetricLabel"] {
+  font-family: 'Courier New', monospace !important;
+  color: var(--ink-soft) !important;
+  font-size: 0.74rem !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+}
+
+/* ========== TABS — file tabs on a folder ========== */
+.stTabs [data-baseweb="tab-list"] {
+  border-bottom: 1px solid var(--ink);
+  gap: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+  font-family: 'Courier New', monospace !important;
+  font-size: 0.85rem !important;
+  letter-spacing: 0.1em !important;
+  color: var(--ink-soft) !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-bottom: none !important;
+  padding: 6px 14px !important;
+  text-transform: uppercase;
+}
+.stTabs [data-baseweb="tab"]:hover {
+  color: var(--blood) !important;
+  background: rgba(139, 26, 26, 0.04) !important;
+}
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+  color: var(--blood) !important;
+  background: var(--paper) !important;
+  border: 1px solid var(--ink) !important;
+  border-bottom: 1px solid var(--paper) !important;
+  position: relative;
+  top: 1px;
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+.stTabs [data-baseweb="tab-border"] { display: none !important; }
+
+/* ========== INPUTS ========== */
+.stTextInput input,
+.stTextInput input[type="text"] {
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-bottom: 2px solid var(--ink) !important;
+  border-radius: 0 !important;
+  font-family: 'Courier New', monospace !important;
+  color: var(--ink) !important;
+  font-size: 0.92rem !important;
+}
+.stTextInput input::placeholder {
+  color: var(--ash) !important;
+  font-style: italic;
+}
+
+[data-baseweb="select"] > div {
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-bottom: 2px solid var(--ink) !important;
+  border-radius: 0 !important;
+  font-family: Georgia, serif !important;
+  color: var(--ink) !important;
+}
+[data-baseweb="select"] [role="listbox"] { background: var(--paper) !important; }
+[data-baseweb="select"] [role="option"] {
+  font-family: Georgia, serif !important;
+  color: var(--ink) !important;
+}
+[data-baseweb="select"] [role="option"]:hover {
+  background: rgba(139, 26, 26, 0.08) !important;
+}
+
+/* Toggle / checkbox text */
+[data-testid="stCheckbox"] label, [data-testid="stToggle"] label,
+[data-testid="stCheckbox"] *, [data-testid="stToggle"] * {
+  color: var(--ink) !important;
+  font-family: 'Courier New', monospace !important;
+  font-size: 0.84rem !important;
+  letter-spacing: 0.05em;
+}
+
+/* Captions — typewriter footnotes */
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {
+  color: var(--ink-soft) !important;
+  font-family: 'Courier New', monospace !important;
+  font-size: 0.76rem !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase;
+}
+
+/* Buttons — file-stamped */
+.stButton button, button[kind="secondary"], button[kind="primary"] {
+  background: var(--paper) !important;
+  border: 1px solid var(--ink) !important;
+  border-bottom-width: 3px !important;
+  border-radius: 0 !important;
+  font-family: 'Courier New', monospace !important;
+  color: var(--ink) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.12em !important;
+  font-size: 0.82rem !important;
+}
+.stButton button:hover {
+  background: var(--blood) !important;
+  color: var(--paper) !important;
+  border-color: var(--blood) !important;
+}
+
+/* Expander */
+[data-testid="stExpander"] {
+  background: var(--paper-deep) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 1px 0 rgba(255, 252, 240, 0.5) inset;
+}
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] summary * {
+  font-family: 'Courier New', monospace !important;
+  color: var(--ink) !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  font-size: 0.86rem !important;
+}
+
+/* Code */
+pre, code, .stCode, [data-testid="stCodeBlock"] {
+  font-family: 'Courier New', monospace !important;
+  background: var(--paper) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-radius: 0 !important;
+}
+
+/* Info / warning notification banners */
+[data-baseweb="notification"], [data-testid="stNotification"], .stAlert {
+  background: var(--paper) !important;
+  border: 1.5px solid var(--blood) !important;
+  border-left-width: 5px !important;
+  border-radius: 0 !important;
+  color: var(--ink) !important;
+  font-family: Georgia, serif !important;
+}
+[data-baseweb="notification"] *, [data-testid="stNotification"] * {
+  color: var(--ink) !important;
+  font-family: Georgia, serif !important;
+}
+
+/* Streamlit's main toolbar / deploy bar — dim it down */
+[data-testid="stHeader"] {
+  background: transparent !important;
+}
+[data-testid="stToolbar"] {
+  background: transparent !important;
+}
+
+/* JSON viewer */
+[data-testid="stJson"] {
+  background: var(--paper) !important;
+  border: 1px solid var(--paper-edge) !important;
+  border-radius: 0 !important;
+  color: var(--ink) !important;
+  font-family: 'Courier New', monospace !important;
+}
+
+/* Image-comparison slider — restyle handle to ink */
+.image-comparison-slider .__rcs-handle {
+  background: var(--ink) !important;
+}
+
+/* ========== ANIMATIONS — papers being placed ========== */
+@keyframes paperFade {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes stampIn {
+  from { opacity: 0; transform: rotate(-1.2deg) scale(1.08); }
+  to   { opacity: 1; transform: rotate(-1.2deg) scale(1); }
+}
+@keyframes inkFade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.card { animation: paperFade 0.55s ease-out both; }
+.priority-card {
+  animation: paperFade 0.7s ease-out both;
+  animation-delay: 0.05s;
+}
+.priority-tag { animation: stampIn 0.45s ease-out 0.4s both; }
+.threat-card { animation: paperFade 0.5s ease-out both; }
+.threat-card:nth-of-type(1) { animation-delay: 0.1s; }
+.threat-card:nth-of-type(2) { animation-delay: 0.2s; }
+.threat-card:nth-of-type(3) { animation-delay: 0.3s; }
+.hero-title { animation: inkFade 0.8s ease-out both; }
+.hero-sub { animation: inkFade 0.8s ease-out 0.2s both; }
+
+/* Legend rows */
+.legend-row {
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin: 4px 0;
+  letter-spacing: 0.04em;
+}
+
+/* Ensure relative z-index for content above paper grain pseudo-elements */
+[data-testid="stAppViewContainer"] > .main { position: relative; z-index: 1; }
+.stApp > div { position: relative; z-index: 1; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -461,6 +901,9 @@ def render_top_threats(bases: list, query: str = ""):
 """,
         unsafe_allow_html=True,
     )
+    if st.button("View Priority Target", key=f"view_priority_{top['base_id']}", use_container_width=True):
+        st.session_state.selected_base_id = top['base_id']
+        st.rerun()
 
     # Ranks 2-4 — compact threat cards in a row.
     next_tier = ranked[1:4]
@@ -505,6 +948,7 @@ def render_top_threats(bases: list, query: str = ""):
 
 def render_overview(bases: list, query: str = ""):
     render_top_threats(bases, query)
+    st.markdown('<div style="margin-top: 32px; margin-bottom: 16px; border-top: 1px solid var(--paper-edge); padding-top: 24px;"></div>', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Global Distribution</div>', unsafe_allow_html=True)
 
     # Map of all bases
@@ -545,10 +989,10 @@ def render_overview(bases: list, query: str = ""):
         deck = pdk.Deck(
             layers=[layer],
             initial_view_state=view,
-            map_style="dark",
+            map_style="light",
             tooltip={
                 "html": "<b>{name}</b><br/>{classification}<br/><i>confidence: {confidence}</i>",
-                "style": {"backgroundColor": "#0b1220", "color": "#e5e7eb"},
+                "style": {"backgroundColor": "#f4ecd8", "color": "#1a1410", "fontFamily": "EB Garamond, serif", "border": "1px solid #1a1410"},
             },
         )
         st.pydeck_chart(deck, use_container_width=True)
@@ -569,28 +1013,25 @@ def render_overview(bases: list, query: str = ""):
         for i, b in enumerate(country_bases):
             with cols[i % len(cols)]:
                 cmd = b["commander_report"]
-                col1, col2 = st.columns([5, 1])
-                with col1:
-                    st.markdown(
-                        f"""
-<div class="card">
-  <div class="kv"><b>BASE #{b['base_id']}</b></div>
-  <div class="classification" style="margin:8px 0 6px 0;">{hl(cmd['facility_classification'], query)}</div>
-  {confidence_pill(cmd['confidence'])}
-  <div class="exec-summary">{hl(cmd['executive_summary'], query)}</div>
-  <div class="muted" style="margin-top:10px;">
-    {len(b['analysts'])} analysts ·
-    {sum(len(a['moondream_detections']) for a in b['analysts'])} detections ·
-    lat {float(b['initial_latitude']):.3f}, lon {float(b['initial_longitude']):.3f}
+                card_html = f"""
+<div class="clickable-card" style="cursor:pointer;" data-base-id="{b['base_id']}">
+  <div class="card">
+    <div class="kv"><b>BASE #{b['base_id']}</b></div>
+    <div class="classification" style="margin:8px 0 6px 0;">{hl(cmd['facility_classification'], query)}</div>
+    {confidence_pill(cmd['confidence'])}
+    <div class="exec-summary">{hl(cmd['executive_summary'], query)}</div>
+    <div class="muted" style="margin-top:10px;">
+      {len(b['analysts'])} analysts ·
+      {sum(len(a['moondream_detections']) for a in b['analysts'])} detections ·
+      lat {float(b['initial_latitude']):.3f}, lon {float(b['initial_longitude']):.3f}
+    </div>
   </div>
 </div>
-""",
-                        unsafe_allow_html=True,
-                    )
-                with col2:
-                    if st.button("→", key=f"view_base_{b['base_id']}", help=f"View BASE #{b['base_id']}"):
-                        st.session_state.selected_base_id = b['base_id']
-                        st.rerun()
+"""
+                st.markdown(card_html, unsafe_allow_html=True)
+                if st.button("View", key=f"view_base_{b['base_id']}", help=f"View BASE #{b['base_id']}", use_container_width=True):
+                    st.session_state.selected_base_id = b['base_id']
+                    st.rerun()
 
 
 # ---------- base detail mode ----------
@@ -654,18 +1095,18 @@ def render_base_detail(base: dict, query: str = ""):
         chart_rows = [{"class": k, "count": v} for k, v in class_counts.most_common()]
         chart = (
             alt.Chart(alt.Data(values=chart_rows))
-            .mark_bar(color="#f59e0b", cornerRadiusEnd=2)
+            .mark_bar(color="#8b1a1a", cornerRadiusEnd=0)
             .encode(
                 x=alt.X(
                     "count:Q",
                     title="detections",
-                    axis=alt.Axis(labelColor="#94a3b8", titleColor="#94a3b8", grid=False),
+                    axis=alt.Axis(labelColor="#3d342c", titleColor="#3d342c", grid=False, domainColor="#1a1410", tickColor="#1a1410"),
                 ),
                 y=alt.Y(
                     "class:N",
                     sort="-x",
                     title=None,
-                    axis=alt.Axis(labelColor="#e5e7eb", labelFontSize=12),
+                    axis=alt.Axis(labelColor="#1a1410", labelFontSize=13, labelFont="EB Garamond", domainColor="#1a1410"),
                 ),
                 tooltip=[
                     alt.Tooltip("class:N", title="class"),
@@ -715,7 +1156,7 @@ def render_base_detail(base: dict, query: str = ""):
         "PathLayer",
         data=path_data,
         get_path="path",
-        get_color=[245, 158, 11, 180],
+        get_color=[139, 26, 26, 200],   # blood-red ink trail
         get_width=3,
         width_min_pixels=2,
         width_max_pixels=4,
@@ -731,8 +1172,8 @@ def render_base_detail(base: dict, query: str = ""):
         radius_max_pixels=22,
         pickable=True,
         stroked=True,
-        get_line_color=[255, 255, 255, 220],
-        line_width_min_pixels=1,
+        get_line_color=[26, 20, 16, 240],  # ink outline on paper
+        line_width_min_pixels=1.5,
     )
 
     text_layer = pdk.Layer(
@@ -740,8 +1181,8 @@ def render_base_detail(base: dict, query: str = ""):
         data=trail_points,
         get_position=["lon", "lat"],
         get_text="label",
-        get_size=14,
-        get_color=[255, 255, 255, 255],
+        get_size=15,
+        get_color=[26, 20, 16, 255],     # ink-black numbers
         get_pixel_offset=[0, -22],
     )
 
@@ -770,10 +1211,10 @@ def render_base_detail(base: dict, query: str = ""):
             zoom=view_zoom,
             pitch=35,
         ),
-        map_style="dark",
+        map_style="light",
         tooltip={
             "html": "<b>Analyst {analyst}</b><br/>zoom: {zoom_m} m<br/>action chosen: <i>{action}</i>",
-            "style": {"backgroundColor": "#0b1220", "color": "#e5e7eb", "fontFamily": "ui-monospace, monospace"},
+            "style": {"backgroundColor": "#f4ecd8", "color": "#1a1410", "fontFamily": "Special Elite, monospace", "border": "1px solid #1a1410"},
         },
     )
     st.pydeck_chart(trail_deck, use_container_width=True)

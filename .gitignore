@@ -47,3 +47,4 @@ chromedriver.exe
 # Logs
 *.log
 .jpg
+.gstack/
