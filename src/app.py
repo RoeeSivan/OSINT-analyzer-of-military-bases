@@ -22,21 +22,13 @@ import altair as alt
 import pydeck as pdk
 import streamlit as st
 
-DATA_PATH = "data/data.json"
-SCREENSHOT_DIR = "screenshots"
-
-CONFIDENCE_COLORS = {"high": "#8b1a1a", "medium": "#a07a2c", "low": "#6b6357"}
-ACTION_COLORS = {
-    "zoom-in": "#8b1a1a",
-    "zoom-out": "#2c3a4a",
-    "move-left": "#a07a2c",
-    "move-right": "#a07a2c",
-    "finish": "#3d342c",
-}
-COUNTRY_FLAGS = {
-    "Egypt": "🇪🇬", "Korea": "🇰🇷", "Russia": "🇷🇺", "China": "🇨🇳",
-    "Iran": "🇮🇷", "Syria": "🇸🇾", "USA": "🇺🇸", "Israel": "🇮🇱",
-}
+from config import (
+    STREAMLIT_DATA_PATH as DATA_PATH,
+    STREAMLIT_SCREENSHOT_DIR as SCREENSHOT_DIR,
+    CONFIDENCE_COLORS,
+    ACTION_COLORS,
+    COUNTRY_FLAGS,
+)
 
 
 # ---------- data loading ----------
